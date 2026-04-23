@@ -232,11 +232,19 @@ def formulation_pie(titles: List[str], fractions: List[float]) -> go.Figure:
         textinfo="label+percent",
         hovertemplate="%{label}: %{value:.4f} (%{percent})<extra></extra>",
     )
+    pie_layout = {
+        **_BASE_LAYOUT,
+        "legend": {
+            **_BASE_LAYOUT.get("legend", {}),
+            "orientation": "v",
+            "x": 1.02,
+            "y": 0.5,
+        },
+    }
     fig.update_layout(
         title="Formulation Composition",
         height=420,
-        legend=dict(orientation="v", x=1.02, y=0.5),
-        **_BASE_LAYOUT,
+        **pie_layout,
     )
     return fig
 
