@@ -38,6 +38,8 @@ st.markdown(
     --sidebar-bg-top: #18323f;
     --sidebar-bg-bottom: #102530;
     --sidebar-text: #f2eadc;
+    --sidebar-text-soft: rgba(242, 234, 220, 0.82);
+    --sidebar-active-bg: rgba(255, 255, 255, 0.12);
     --shadow: 0 16px 48px rgba(23, 49, 62, 0.08);
     --shadow-soft: 0 10px 24px rgba(23, 49, 62, 0.06);
 }
@@ -80,11 +82,22 @@ p, li, label, .stMarkdown, .stCaption, .stText, .stAlert {
     color: var(--sidebar-text);
 }
 
+[data-testid='stSidebar'] p,
+[data-testid='stSidebar'] li,
+[data-testid='stSidebar'] label,
+[data-testid='stSidebar'] span,
+[data-testid='stSidebar'] div,
+[data-testid='stSidebar'] a,
+[data-testid='stSidebar'] button {
+    color: var(--sidebar-text) !important;
+}
+
 [data-testid='stSidebarNav'] {
     padding-top: 0.25rem;
 }
 
 [data-testid='stSidebarNav'] a {
+    background: transparent;
     border-radius: 14px;
     margin-bottom: 0.22rem;
 }
@@ -93,8 +106,38 @@ p, li, label, .stMarkdown, .stCaption, .stText, .stAlert {
     background: rgba(255,255,255,0.08);
 }
 
+[data-testid='stSidebarNav'] a[aria-current='page'] {
+    background: var(--sidebar-active-bg);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
+}
+
+[data-testid='stSidebarNav'] a[aria-current='page']:hover {
+    background: rgba(255,255,255,0.16);
+}
+
 [data-testid='stSidebarNav'] a[data-testid='stSidebarNavLink'] span {
-    color: var(--sidebar-text);
+    color: var(--sidebar-text) !important;
+}
+
+[data-testid='stSidebarNav'] a[data-testid='stSidebarNavLink'] p,
+[data-testid='stSidebarNav'] a[data-testid='stSidebarNavLink'] div,
+[data-testid='stSidebarNav'] a[data-testid='stSidebarNavLink'] svg {
+    color: var(--sidebar-text) !important;
+    fill: var(--sidebar-text);
+}
+
+[data-testid='stSidebarNav'] a:not([aria-current='page']) [data-testid='stSidebarNavLink'] p,
+[data-testid='stSidebarNav'] a:not([aria-current='page']) [data-testid='stSidebarNavLink'] span {
+    color: var(--sidebar-text-soft) !important;
+}
+
+[data-testid='stSidebarNav'] a[aria-current='page'] [data-testid='stSidebarNavLink'] p,
+[data-testid='stSidebarNav'] a[aria-current='page'] [data-testid='stSidebarNavLink'] span,
+[data-testid='stSidebarNav'] a[aria-current='page'] [data-testid='stSidebarNavLink'] div,
+[data-testid='stSidebarNav'] a[aria-current='page'] [data-testid='stSidebarNavLink'] svg {
+    color: var(--sidebar-text) !important;
+    fill: var(--sidebar-text);
+    font-weight: 700;
 }
 
 .sidebar-brand {
@@ -110,6 +153,7 @@ p, li, label, .stMarkdown, .stCaption, .stText, .stAlert {
     font-size: 0.7rem;
     letter-spacing: 0.16em;
     opacity: 0.72;
+    color: var(--sidebar-text-soft);
 }
 
 .sidebar-brand .title {
@@ -117,6 +161,7 @@ p, li, label, .stMarkdown, .stCaption, .stText, .stAlert {
     font-size: 1.2rem;
     font-weight: 700;
     margin-top: 0.4rem;
+    color: var(--sidebar-text);
 }
 
 .sidebar-brand .copy {
@@ -124,6 +169,7 @@ p, li, label, .stMarkdown, .stCaption, .stText, .stAlert {
     line-height: 1.45;
     opacity: 0.82;
     margin-top: 0.45rem;
+    color: var(--sidebar-text);
 }
 
 .page-shell {
