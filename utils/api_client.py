@@ -175,18 +175,35 @@ def get_options() -> Dict:
     """
     GET /digital_formulator/options
 
-    Returns available objectives, constraints, excipients, APIs, component
-    names, and current defaults.  If the endpoint returns a 5xx error,
-    silently falls back to minimal defaults so the dashboard remains usable.
+    Returns available objectives, constraints, excipients, and current
+    defaults.  Augments the response with ``available_apis`` and
+    ``component_names`` from GET /components (process-cached) when the
+    backend does not supply them directly.
+
+    Falls back to minimal built-in defaults on 5xx errors so the
+    dashboard remains usable when the API is degraded.
     """
     try:
-        return _get("/digital_formulator/options")
+        opts = _get("/digital_formulator/options")
     except requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code >= 500:
             return _FALLBACK_OPTIONS
         raise
     except Exception:
         return _FALLBACK_OPTIONS
+
+    # /digital_formulator/options may not include available_apis or
+    # component_names — fetch them from /components (cached) instead.
+    if "available_apis" not in opts or "component_names" not in opts:
+        try:
+            comp = get_components()
+            opts.setdefault("available_apis",  sorted(comp["apis"].keys()))
+            opts.setdefault("component_names", comp["all"])
+        except Exception:
+            opts.setdefault("available_apis",  [])
+            opts.setdefault("component_names", {})
+
+    return opts
 
 
 def single_run(
