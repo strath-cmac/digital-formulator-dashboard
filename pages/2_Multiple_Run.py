@@ -103,8 +103,9 @@ with res_col:
     kp = result.get("kawakita_params", {}); dp = result.get("duckworth_params", {})
     cp_min_used = st.session_state.get("mr_cp_min", 70.0); cp_max_used = st.session_state.get("mr_cp_max", 250.0)
 
+    _sep = " \u00b7 "
     st.markdown(f"### Results  \u00b7  {cp_min_used:.0f} \u2013 {cp_max_used:.0f} MPa")
-    st.caption(f"Formulation: {' \u00b7 '.join(st.session_state.get('mr_titles', []))}")
+    st.caption("Formulation: " + _sep.join(st.session_state.get("mr_titles", [])))
 
     tab_comp, tab_ten, tab_emp, tab_gran, tab_form, tab_raw = st.tabs(["\U0001f4ca Compressibility", "\U0001f4aa Tensile Strength", "\U0001f9ee Empirical Models", "\u2696\ufe0f Granular Props", "\U0001f369 Formulation", "\U0001f4cb Raw Data"])
 

@@ -118,8 +118,9 @@ with res_col:
     eaoif_val = result.get("effective_angle_of_internal_friction", 0.0)
     flow_class = ("Free-flowing" if ffc_val > 10 else "Easy-flowing" if ffc_val > 4 else "Cohesive" if ffc_val > 2 else "Very cohesive")
 
+    _sep = " \u00b7 "
     st.markdown(f"### Results  \u00b7  {cp_used:.0f} MPa")
-    st.caption(f"Formulation: {' \u00b7 '.join(st.session_state.get('sr_titles', []))}")
+    st.caption("Formulation: " + _sep.join(st.session_state.get("sr_titles", [])))
 
     tab_gran, tab_tablet, tab_morph, tab_form, tab_raw = st.tabs(["\u2696\ufe0f Granular", "\U0001f48a Tablet", "\U0001f52c Morphology", "\U0001f369 Formulation", "\U0001f4cb Raw Data"])
 

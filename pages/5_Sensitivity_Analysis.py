@@ -288,7 +288,7 @@ if run_btn:
         st.session_state["sa_comps"]   = list(fracs.keys())
         st.session_state["sa_titles"]  = [component_short_name(c) for c in fracs]
         if mode == "Vary Fraction":
-            st.session_state["sa_cp_fixed"] = cp_fixed
+            st.session_state["sa_cp_fixed_val"] = cp_fixed
     else:
         st.error("All simulation points failed. Check the API connection.")
         st.stop()
@@ -313,7 +313,7 @@ if sa_mode == "Vary Fraction":
     saved_comps  = st.session_state.get("sa_comps", [])
     saved_titles = st.session_state.get("sa_titles", [])
     saved_fracs  = st.session_state.get("sa_fracs", {})
-    saved_cp     = st.session_state.get("sa_cp_fixed", 200.0)
+    saved_cp     = st.session_state.get("sa_cp_fixed_val", 200.0)
     vary_idx = None
     if vary_comp and vary_comp in saved_comps:
         vary_idx = saved_comps.index(vary_comp)

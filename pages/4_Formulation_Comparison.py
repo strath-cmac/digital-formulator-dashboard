@@ -261,16 +261,11 @@ tab_props, tab_radar, tab_psd, tab_ar, tab_form, tab_dl = st.tabs(
 with tab_props:
     st.subheader("Side-by-Side Property Table")
     st.dataframe(
-        df_compare.style
-            .format("{:.4f}", na_rep="—")
-            .background_gradient(axis=0, cmap="Blues"),
+        df_compare.style.format("{:.4f}", na_rep="—"),
         use_container_width=True,
         height=min(600, 42 * (len(df_compare) + 2)),
     )
-    st.caption(
-        "Colour intensity is normalised **per column** (independent of other columns).  "
-        "Use the radar chart tab for a holistic cross-property view."
-    )
+    st.caption("Use the radar chart tab for a holistic cross-property view.")
 
     st.divider()
     st.subheader("Metric Cards")
