@@ -78,17 +78,22 @@ def _post(endpoint: str, payload: Dict, timeout: int = TIMEOUT_SHORT) -> Dict:
 
 def health_check() -> Tuple[bool, str]:
     """Ping the options endpoint; return (ok, message)."""
+    url = f"{BASE_URL}/digital_formulator/options"
     try:
         _get("/digital_formulator/options", timeout=10)
         return True, "Connected"
     except requests.exceptions.ConnectionError:
-        return False, "Cannot connect to API — is it running?"
+        return False, (
+            f"Connection refused — cannot reach {url}\n"
+            "If the API is running on the **same machine** as Docker, use "
+            "`--network=host` (Linux) or `http://host.docker.internal:8000` (Docker Desktop)."
+        )
     except requests.exceptions.Timeout:
-        return False, "API timed out"
+        return False, f"Request timed out after 10 s — {url}"
     except requests.exceptions.HTTPError as e:
-        return False, f"HTTP error: {e}"
+        return False, f"HTTP {e.response.status_code} from {url} — {e}"
     except Exception as e:
-        return False, str(e)
+        return False, f"{url} — {e}"
 
 
 def get_options() -> Dict:

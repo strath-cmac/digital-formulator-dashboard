@@ -56,10 +56,49 @@ with status_col:
         st.error(f"❌  API Unavailable — {msg}")
 
 if not ok:
-    st.info(
-        "Make sure the Digital Formulator API is running and that `API_BASE_URL` "
-        f"is set correctly (currently `{os.getenv('API_BASE_URL', 'http://localhost:8000')}`)."
-    )
+    _configured_url = os.getenv("API_BASE_URL", "http://localhost:8000")
+    st.warning(f"Configured `API_BASE_URL`: **{_configured_url}**")
+
+    with st.expander("🔧 Troubleshooting — Docker networking", expanded=True):
+        st.markdown(
+            f"""
+The dashboard tried to reach:
+```
+{_configured_url}/digital_formulator/options
+```
+
+**Pick the scenario that matches your setup:**
+
+| Scenario | Correct `API_BASE_URL` / Docker flag |
+|----------|--------------------------------------|
+| API and dashboard on the **same Linux machine** (Docker bridge) | Run with `--network=host`; keep `API_BASE_URL=http://localhost:8000` |
+| API and dashboard on the **same machine — Docker Desktop** (Windows / macOS) | `API_BASE_URL=http://host.docker.internal:8000` |
+| API on a **different machine / remote server** | `API_BASE_URL=http://<remote-ip>:8000` and ensure port 8000 is open in the server firewall |
+
+**Same-machine fix (Linux):**
+```bash
+docker run --network=host \\
+  -e API_BASE_URL=http://localhost:8000 \\
+  mosalehian/digital-formulator-dashboard:latest
+```
+*(with `--network=host` the `-p` flag is not needed — the dashboard binds directly to host port 8501)*
+
+**Same-machine fix (Docker Desktop — Windows / macOS):**
+```bash
+docker run -p 8501:8501 \\
+  -e API_BASE_URL=http://host.docker.internal:8000 \\
+  mosalehian/digital-formulator-dashboard:latest
+```
+
+**Remote-machine fix:**
+```bash
+docker run -p 8501:8501 \\
+  -e API_BASE_URL=http://130.159.77.49:8000 \\
+  mosalehian/digital-formulator-dashboard:latest
+```
+*(Ensure port 8000 accepts inbound connections on the API server's firewall / security group.)*
+"""
+        )
     st.stop()
 
 # ── Overview metrics ─────────────────────────────────────────────────────
