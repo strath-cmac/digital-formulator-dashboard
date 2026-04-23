@@ -27,44 +27,14 @@ TIMEOUT_SHORT: int = 30
 TIMEOUT_MEDIUM: int = 120
 TIMEOUT_LONG: int = 900   # optimiser can run for many minutes
 
-# ── Component display labels ────────────────────────────────────────────
-# Hardcoded fallback — the FastAPI /options endpoint only returns IDs.
-KNOWN_COMPONENT_LABELS: Dict[str, str] = {
-    # ── Active Pharmaceutical Ingredients ──────────────────────────────
-    "dm1":  "Dexamethasone",
-    # ── Excipients: disintegrants ────────────────────────────────────
-    "cc1":  "Croscarmellose Sodium",
-    # ── Excipients: lubricants ────────────────────────────────────────
-    "ms1":  "Magnesium Stearate",
-    # ── Excipients: fillers / diluents ────────────────────────────────
-    "la3":  "Lactose (Lactohale LH300)",
-    "la4":  "Lactose (Respitose SV003)",
-    "la6":  "Lactose (SuperTab 14SD)",
-    "la8":  "Lactose (Pharmatose 450M)",
-    "la9":  "Lactose (SuperTab 30SD)",
-    "la10": "Lactose (Tablettose 100)",
-    "ma1":  "Mannitol (Pearlitol 200SD)",
-    "mc5":  "MCC (Avicel PH101)",
-    "mc6":  "MCC (Avicel PH102)",
-    "mc7":  "MCC (Avicel PH200)",
-    # ── Excipients: binders / matrix formers ─────────────────────────
-    "sh14": "HPMC (Pharmacoat 603)",
-    "sh15": "HPMC (Methocel K4M)",
-    "sh16": "HPMC",
-}
-
-# IDs that are Active Pharmaceutical Ingredients (not excipients).
-# Used to tag labels and populate available_apis in options.
-KNOWN_API_IDS: List[str] = ["dm1"]
-
-# ── Hardcoded fallback for /options ────────────────────────────────────
-# Used when the /digital_formulator/options endpoint returns 5xx.
-# Values mirror insilico_formulation_optimisation_v4.py defaults.
+# ── Fallback options ────────────────────────────────────────────────────
+# Used when /digital_formulator/options returns 5xx.
+# Component lists are intentionally empty — the dashboard will show an
+# error banner if the API is unreachable rather than misleading stale data.
 _FALLBACK_OPTIONS: Dict = {
-    # APIs and excipients are kept separate — scientifically distinct roles.
-    "available_apis":       list(KNOWN_API_IDS),
-    "available_excipients": sorted(c for c in KNOWN_COMPONENT_LABELS if c not in KNOWN_API_IDS),
-    "available_objectives": [
+    "available_apis":        [],
+    "available_excipients":  [],
+    "available_objectives":  [
         "maximise_tensile",
         "minimise_tablet_weight",
         "maximise_porosity",
@@ -79,6 +49,7 @@ _FALLBACK_OPTIONS: Dict = {
         "tensile_mean_min",
         "tensile_strength_min",
     ],
+    "component_names": {},
     "current_defaults": {
         "objectives":             ["maximise_tensile", "minimise_tablet_weight"],
         "constraints":            [
@@ -87,8 +58,7 @@ _FALLBACK_OPTIONS: Dict = {
             {"name": "tensile_strength_min",   "threshold": 2.0},
             {"name": "eaoif_max",              "threshold": 41.0},
         ],
-        "excipient_options":      ["la3", "la4", "la6", "la8", "la9", "la10",
-                                   "ma1", "mc5", "mc6", "mc7", "sh14", "sh15"],
+        "excipient_options":      [],
         "disintegrant_id":        "cc1",
         "disintegrant_fraction":  0.08,
         "lubricant_id":           "ms1",
@@ -101,6 +71,11 @@ _FALLBACK_OPTIONS: Dict = {
     },
 }
 
+# ── Process-level component name cache ─────────────────────────────────
+# Populated on first call to get_components() and reused for the
+# lifetime of the Streamlit worker process.
+_COMP_CACHE: Dict[str, Any] = {}
+
 
 def component_label(cid: str) -> str:
     """Return a human-readable label for a component ID.
@@ -108,16 +83,15 @@ def component_label(cid: str) -> str:
     APIs are tagged with '[API]' so they are visually distinct from excipients
     in every formulation builder dropdown.
     """
-    name = KNOWN_COMPONENT_LABELS.get(cid)
-    if name is None:
-        return cid
-    tag = " [API]" if cid in KNOWN_API_IDS else ""
+    comp = get_components()
+    name = comp["all"].get(cid, cid)
+    tag = " [API]" if cid in comp["apis"] else ""
     return f"{name}{tag} ({cid})"
 
 
 def component_short_name(cid: str) -> str:
     """Return only the name portion (without the ID suffix)."""
-    return KNOWN_COMPONENT_LABELS.get(cid, cid)
+    return get_components()["all"].get(cid, cid)
 
 
 # ── Internal helpers ────────────────────────────────────────────────────
@@ -135,6 +109,42 @@ def _post(endpoint: str, payload: Dict, timeout: int = TIMEOUT_SHORT) -> Dict:
 
 
 # ── Public API ──────────────────────────────────────────────────────────
+
+def get_components() -> Dict[str, Dict[str, str]]:
+    """
+    GET /components — returns component registry with APIs and excipients.
+
+    Response shape::
+
+        {
+            "all":        {id: name, ...},   # every material in df_raw
+            "apis":       {id: name, ...},   # valid API IDs for the formulator
+            "excipients": {id: name, ...},   # non-API materials
+        }
+
+    Cached at the process level so the network call is made at most once
+    per Streamlit worker process.
+    """
+    if not _COMP_CACHE:
+        try:
+            result = _get("/components", timeout=TIMEOUT_MEDIUM)
+        except Exception:
+            result = {"all": {}, "apis": {}, "excipients": {}}
+        _COMP_CACHE.update(result)
+    return _COMP_CACHE
+
+
+def get_dataframe(name: str) -> Dict:
+    """
+    GET /data/{name} — retrieve one of the seven core datasets as JSON.
+
+    Valid names: df_raw, df_blend, df_tablet, psd_raw, psd_blend, ar_raw, ar_blend
+
+    - Tabular datasets (df_raw, df_blend, df_tablet) → list of row dicts
+    - Matrix datasets (psd_raw, psd_blend, ar_raw, ar_blend) → column dict
+    """
+    return _get(f"/data/{name}", timeout=TIMEOUT_MEDIUM)
+
 
 def health_check() -> Tuple[bool, str]:
     """Verify the API is reachable by fetching /openapi.json (always available).
@@ -165,20 +175,12 @@ def get_options() -> Dict:
     """
     GET /digital_formulator/options
 
-    Returns available objectives, constraints, excipients and current defaults.
-    If the endpoint returns a 5xx error (known issue when the server-side
-    pipeline data fails to load), silently falls back to hardcoded defaults
-    so the rest of the dashboard remains fully functional.
+    Returns available objectives, constraints, excipients, APIs, component
+    names, and current defaults.  If the endpoint returns a 5xx error,
+    silently falls back to minimal defaults so the dashboard remains usable.
     """
-    def _inject_apis(opts: Dict) -> Dict:
-        """Ensure available_apis is populated even if the backend omits it."""
-        if "available_apis" not in opts:
-            opts = dict(opts)
-            opts["available_apis"] = list(KNOWN_API_IDS)
-        return opts
-
     try:
-        return _inject_apis(_get("/digital_formulator/options"))
+        return _get("/digital_formulator/options")
     except requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code >= 500:
             return _FALLBACK_OPTIONS
