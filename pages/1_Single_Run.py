@@ -12,7 +12,10 @@ import json
 
 import streamlit as st
 
-from utils.api_client import get_options, single_run, component_label, component_short_name
+from utils.api_client import (
+    get_options, single_run, component_label, component_short_name,
+    ffc_v3, ffc_v4_class,
+)
 from utils.plotting import psd_figure, ar_figure, pca_bar, formulation_pie
 
 # ── Page config ──────────────────────────────────────────────────────────
@@ -92,6 +95,15 @@ with st.sidebar:
         step=5.0,
     )
 
+    fetch_ffc_models = st.checkbox(
+        "Include FFC model comparison",
+        value=False,
+        help=(
+            "Also calls the v3 regression and v4 classification FFC models "
+            "(2 extra API calls). Uncheck for faster runs."
+        ),
+    )
+
     run_btn = st.button(
         "▶ Run Simulation",
         type="primary",
@@ -120,10 +132,21 @@ if run_btn:
                 fractions=norm_fracs,
                 cp=cp,
             )
-            st.session_state["sr_result"]  = result
-            st.session_state["sr_titles"]  = titles_list
-            st.session_state["sr_fracs"]   = norm_fracs
+            st.session_state["sr_result"]   = result
+            st.session_state["sr_titles"]   = titles_list
+            st.session_state["sr_fracs"]    = norm_fracs
             st.session_state["sr_comp_ids"] = comp_ids
+            # Optional extra FFC models
+            if fetch_ffc_models:
+                st.session_state["sr_ffc_v3"]  = ffc_v3(
+                    titles=titles_list, components=comp_ids, fractions=norm_fracs
+                )
+                st.session_state["sr_ffc_v4"]  = ffc_v4_class(
+                    titles=titles_list, components=comp_ids, fractions=norm_fracs
+                )
+            else:
+                st.session_state.pop("sr_ffc_v3", None)
+                st.session_state.pop("sr_ffc_v4", None)
         except Exception as e:
             st.error(f"Simulation failed: {e}")
             st.stop()
@@ -181,6 +204,33 @@ with tab_gran:
 | < 2       | Very cohesive  |
 """
         )
+
+    # FFC model comparison (optional, only if checkbox was ticked)
+    ffc_v3_val = st.session_state.get("sr_ffc_v3")
+    ffc_v4_lbl = st.session_state.get("sr_ffc_v4")
+    if ffc_v3_val is not None or ffc_v4_lbl is not None:
+        st.divider()
+        st.caption("**FFC Model Comparison** — v1 (regression) · v3 (new regression) · v4 (classification)")
+        mc1, mc2, mc3 = st.columns(3)
+        mc1.metric(
+            "FFC v1 — 1st-gen regression",
+            f"{ffc_val:.4f}",
+            help="Original regression model shipped with the platform.",
+        )
+        if ffc_v3_val is not None:
+            delta_v3 = ffc_v3_val - ffc_val
+            mc2.metric(
+                "FFC v3 — 2nd-gen regression",
+                f"{ffc_v3_val:.4f}",
+                delta=f"{delta_v3:+.4f} vs v1",
+                help="Improved regression model trained on extended dataset.",
+            )
+        if ffc_v4_lbl is not None:
+            mc3.metric(
+                "FFC v4 — classification",
+                ffc_v4_lbl,
+                help="Classification model predicting the discrete flow class.",
+            )
 
 # ── Tablet Properties ─────────────────────────────────────────────────────
 with tab_tablet:

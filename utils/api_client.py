@@ -181,3 +181,74 @@ def digital_formulator(
         payload["excipient_options"] = excipient_options
 
     return _post("/digital_formulator", payload, timeout=TIMEOUT_LONG)
+
+
+def multiple_run_syn_api(
+    titles: List[str],
+    components: List[str],
+    fractions: List[float],
+    cp_range: Tuple[float, float],
+    n_runs: int,
+    api_psd: List[float],
+) -> Dict:
+    """
+    POST /multiple_run_syn_api
+
+    Kawakita + Duckworth empirical models with a user-supplied synthetic API PSD.
+    Useful for in-silico exploration of novel APIs not yet in the training database.
+    """
+    return _post(
+        "/multiple_run_syn_api",
+        {
+            "titles":     titles,
+            "components": components,
+            "fractions":  fractions,
+            "cp_range":   list(cp_range),
+            "n_runs":     n_runs,
+            "api_psd":    api_psd,
+        },
+        timeout=TIMEOUT_MEDIUM,
+    )
+
+
+def ffc_v3(
+    titles: List[str],
+    components: List[str],
+    fractions: List[float],
+) -> Optional[float]:
+    """
+    POST /ffc_new — 2nd-generation FFC regression model (v3).
+
+    Returns the predicted FFC value, or ``None`` if the endpoint is
+    unavailable (e.g. model not loaded on the server).
+    """
+    try:
+        res = _post(
+            "/ffc_new",
+            {"titles": titles, "components": components, "fractions": fractions},
+        )
+        val = res.get("ffc_new")
+        return float(val) if val is not None else None
+    except Exception:
+        return None
+
+
+def ffc_v4_class(
+    titles: List[str],
+    components: List[str],
+    fractions: List[float],
+) -> Optional[str]:
+    """
+    POST /ffc_class — FFC classification label from the v4 model.
+
+    Returns a string label (e.g. ``"Easy-flowing"``) or ``None`` if
+    the endpoint is unavailable.
+    """
+    try:
+        res = _post(
+            "/ffc_class",
+            {"titles": titles, "components": components, "fractions": fractions},
+        )
+        return res.get("ffc_class")
+    except Exception:
+        return None

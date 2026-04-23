@@ -263,3 +263,245 @@ def formulation_bar(titles: List[str], fractions: List[float]) -> go.Figure:
         **_BASE_LAYOUT,
     )
     return fig
+
+
+# ── Multi-formulation comparison ────────────────────────────────────────
+
+# Polar charts use a separate layout (plot_bgcolor has no effect on polar axes)
+_POLAR_LAYOUT: dict = dict(
+    template="plotly_dark",
+    paper_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="sans-serif", size=13),
+    margin=dict(l=60, r=60, t=68, b=60),
+)
+
+
+def _hex_rgba(hex_color: str, alpha: float = 0.15) -> str:
+    """Convert a ``#rrggbb`` hex string to ``rgba(r,g,b,alpha)``."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def radar_chart(
+    names: List[str],
+    metric_matrix: List[List[float]],
+    metric_labels: List[str],
+) -> go.Figure:
+    """
+    Normalised radar/spider chart comparing multiple formulations.
+
+    Each metric is linearly rescaled so that the minimum observed value → 0
+    and the maximum → 1.  Where all formulations share the same value the
+    metric is placed at 0.5.
+
+    Parameters
+    ----------
+    names         : display name of each formulation
+    metric_matrix : shape (n_formulations, n_metrics) – raw un-normalised values
+    metric_labels : axis label for each metric (same length as inner lists)
+    """
+    import numpy as np
+
+    arr = np.array(metric_matrix, dtype=float)
+    mn, mx = arr.min(axis=0), arr.max(axis=0)
+    rng = mx - mn
+
+    norm = np.where(rng == 0, 0.5, (arr - mn) / rng)  # identical metric → 0.5
+
+    theta = metric_labels + [metric_labels[0]]  # close the polygon
+
+    fig = go.Figure()
+    for i, (name, row) in enumerate(zip(names, norm.tolist())):
+        color = _PALETTE[i % len(_PALETTE)]
+        fig.add_trace(
+            go.Scatterpolar(
+                r=row + [row[0]],
+                theta=theta,
+                fill="toself",
+                fillcolor=_hex_rgba(color, 0.12),
+                line=dict(color=color, width=2),
+                name=name,
+            )
+        )
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1],
+                showticklabels=False,
+                gridcolor="rgba(255,255,255,0.12)",
+            ),
+            angularaxis=dict(direction="clockwise"),
+            bgcolor="rgba(15,23,42,0.6)",
+        ),
+        title="Normalised Property Comparison  (0 = min across formulations, 1 = max)",
+        height=520,
+        showlegend=True,
+        **_POLAR_LAYOUT,
+    )
+    return fig
+
+
+def overlay_psd_figure(datasets: List[tuple]) -> go.Figure:
+    """
+    Overlay multiple PSD curves on one chart.
+
+    Parameters
+    ----------
+    datasets : list of ``(name, ce_diameters, psd_values)`` tuples
+    """
+    fig = go.Figure()
+    for i, (name, x, y) in enumerate(datasets):
+        color = _PALETTE[i % len(_PALETTE)]
+        fig.add_trace(
+            go.Scatter(
+                x=x, y=y, mode="lines",
+                name=name,
+                line=dict(color=color, width=2),
+                fill="tozeroy",
+                fillcolor=_hex_rgba(color, 0.07),
+            )
+        )
+    fig.update_layout(
+        title="Particle Size Distribution Comparison",
+        xaxis_title="CE Diameter (µm)",
+        yaxis_title="Frequency",
+        height=400,
+        **_BASE_LAYOUT,
+    )
+    return fig
+
+
+def overlay_ar_figure(datasets: List[tuple]) -> go.Figure:
+    """
+    Overlay multiple aspect-ratio distributions.
+
+    Parameters
+    ----------
+    datasets : list of ``(name, ar_x, ar_y)`` tuples
+    """
+    fig = go.Figure()
+    for i, (name, x, y) in enumerate(datasets):
+        color = _PALETTE[i % len(_PALETTE)]
+        fig.add_trace(
+            go.Scatter(
+                x=x, y=y, mode="lines",
+                name=name,
+                line=dict(color=color, width=2),
+                fill="tozeroy",
+                fillcolor=_hex_rgba(color, 0.07),
+            )
+        )
+    fig.update_layout(
+        title="Aspect Ratio Distribution Comparison",
+        xaxis_title="Aspect Ratio",
+        yaxis_title="Frequency",
+        height=400,
+        **_BASE_LAYOUT,
+    )
+    return fig
+
+
+def multi_line_figure(
+    df: "pd.DataFrame",
+    x_col: str,
+    series: List[tuple],
+    x_label: str,
+    title: str,
+    y_label: str = "Value",
+) -> go.Figure:
+    """
+    Multi-line response-curve chart for sensitivity / parameter-sweep analysis.
+
+    Parameters
+    ----------
+    df      : DataFrame containing ``x_col`` and the property columns
+    x_col   : column to use as the x axis
+    series  : list of ``(col_name, display_label, hex_color)`` tuples
+    x_label : x-axis title
+    title   : chart title
+    y_label : y-axis title
+    """
+    fig = go.Figure()
+    for col, label, color in series:
+        if col in df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=df[x_col].tolist(),
+                    y=df[col].tolist(),
+                    mode="lines+markers",
+                    name=label,
+                    line=dict(color=color, width=2),
+                    marker=dict(size=6),
+                )
+            )
+    fig.update_layout(
+        title=title,
+        xaxis_title=x_label,
+        yaxis_title=y_label,
+        height=400,
+        **_BASE_LAYOUT,
+    )
+    return fig
+
+
+def sensitivity_band_figure(
+    df: "pd.DataFrame",
+    x_col: str,
+    mean_col: str,
+    std_col: str,
+    x_label: str,
+    y_label: str,
+    title: str,
+    color: str = _BLUE,
+) -> go.Figure:
+    """
+    Single-property sensitivity line with a ±std confidence band.
+
+    Parameters
+    ----------
+    df       : DataFrame
+    x_col    : x-axis column
+    mean_col : mean value column
+    std_col  : std-dev column (band = mean ± std)
+    """
+    fig = go.Figure()
+    x = df[x_col].tolist()
+    mean = df[mean_col].tolist()
+    std  = df[std_col].tolist() if std_col in df.columns else [0.0] * len(mean)
+
+    upper = [m + s for m, s in zip(mean, std)]
+    lower = [m - s for m, s in zip(mean, std)]
+
+    # Confidence band
+    fig.add_trace(
+        go.Scatter(
+            x=x + x[::-1],
+            y=upper + lower[::-1],
+            fill="toself",
+            fillcolor=_hex_rgba(color, 0.15),
+            line=dict(color="rgba(0,0,0,0)"),
+            name="±std",
+            hoverinfo="skip",
+        )
+    )
+    # Mean line
+    fig.add_trace(
+        go.Scatter(
+            x=x, y=mean,
+            mode="lines+markers",
+            name=mean_col,
+            line=dict(color=color, width=2.5),
+            marker=dict(size=6),
+        )
+    )
+    fig.update_layout(
+        title=title,
+        xaxis_title=x_label,
+        yaxis_title=y_label,
+        height=400,
+        **_BASE_LAYOUT,
+    )
+    return fig
