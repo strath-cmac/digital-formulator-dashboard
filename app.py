@@ -463,10 +463,12 @@ with tab_con:
     rows = [
         {
             "Key":               c,
-            "Condition":         short,
-            "Detail":            detail,
+            "Condition":         "≥ threshold" if "min" in c else "≤ threshold",
+            "Detail":            _CON_DESC.get(c, "—"),
             "Default":           "✓" if c in def_map else "",
             "Default Threshold": def_map.get(c, "—"),
-        })
+        }
+        for c in constraints
+    ]
     import pandas as pd
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
