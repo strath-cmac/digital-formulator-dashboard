@@ -48,6 +48,47 @@ KNOWN_COMPONENT_LABELS: Dict[str, str] = {
     "dm1":  "Dexamethasone",
 }
 
+# ── Hardcoded fallback for /options ────────────────────────────────────
+# Used when the /digital_formulator/options endpoint returns 5xx.
+# Values mirror insilico_formulation_optimisation_v4.py defaults.
+_FALLBACK_OPTIONS: Dict = {
+    "available_excipients": sorted(KNOWN_COMPONENT_LABELS.keys()),
+    "available_objectives": [
+        "maximise_tensile",
+        "minimise_tablet_weight",
+        "maximise_porosity",
+        "maximise_ffc",
+        "minimise_eaoif",
+    ],
+    "available_constraints": [
+        "eaoif_max",
+        "ffc_min",
+        "porosity_min",
+        "porosity_minus_std_min",
+        "tensile_mean_min",
+        "tensile_strength_min",
+    ],
+    "current_defaults": {
+        "objectives":             ["maximise_tensile", "minimise_tablet_weight"],
+        "constraints":            [
+            {"name": "porosity_minus_std_min", "threshold": 0.14},
+            {"name": "ffc_min",                "threshold": 4.0},
+            {"name": "tensile_strength_min",   "threshold": 2.0},
+        ],
+        "excipient_options":      ["la3", "la4", "la6", "la8", "la9", "la10",
+                                   "ma1", "mc5", "mc6", "mc7", "sh14", "sh15"],
+        "disintegrant_id":        "cc1",
+        "disintegrant_fraction":  0.08,
+        "lubricant_id":           "ms1",
+        "lubricant_fraction":     0.01,
+        "cp_bounds":              [70.0, 250.0],
+        "filler1_fraction_lower": 0.0,
+        "pop_size":               20,
+        "n_iters":                50,
+        "n_threads":              8,
+    },
+}
+
 
 def component_label(cid: str) -> str:
     """Return a human-readable label for a component ID."""
@@ -77,14 +118,19 @@ def _post(endpoint: str, payload: Dict, timeout: int = TIMEOUT_SHORT) -> Dict:
 # ── Public API ──────────────────────────────────────────────────────────
 
 def health_check() -> Tuple[bool, str]:
-    """Ping the options endpoint; return (ok, message)."""
-    url = f"{BASE_URL}/digital_formulator/options"
+    """Verify the API is reachable by fetching /openapi.json (always available).
+
+    /digital_formulator/options is NOT used here because it can return 5xx
+    while all simulation endpoints are working fine.
+    """
+    url = f"{BASE_URL}/openapi.json"
     try:
-        _get("/digital_formulator/options", timeout=10)
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
         return True, "Connected"
     except requests.exceptions.ConnectionError:
         return False, (
-            f"Connection refused — cannot reach {url}\n"
+            f"Connection refused — cannot reach {BASE_URL}\n"
             "If the API is running on the **same machine** as Docker, use "
             "`--network=host` (Linux) or `http://host.docker.internal:8000` (Docker Desktop)."
         )
@@ -99,9 +145,20 @@ def health_check() -> Tuple[bool, str]:
 def get_options() -> Dict:
     """
     GET /digital_formulator/options
+
     Returns available objectives, constraints, excipients and current defaults.
+    If the endpoint returns a 5xx error (known issue when the server-side
+    pipeline data fails to load), silently falls back to hardcoded defaults
+    so the rest of the dashboard remains fully functional.
     """
-    return _get("/digital_formulator/options")
+    try:
+        return _get("/digital_formulator/options")
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code >= 500:
+            return _FALLBACK_OPTIONS
+        raise
+    except Exception:
+        return _FALLBACK_OPTIONS
 
 
 def single_run(

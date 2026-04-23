@@ -9,7 +9,7 @@ import os
 
 import streamlit as st
 
-from utils.api_client import health_check, get_options, component_label
+from utils.api_client import health_check, get_options, component_label, _FALLBACK_OPTIONS
 
 # ── Page config ─────────────────────────────────────────────────────────
 st.set_page_config(
@@ -37,9 +37,14 @@ if "api_ok" not in st.session_state or do_refresh:
     ok, msg = health_check()
     st.session_state["api_ok"] = ok
     st.session_state["api_msg"] = msg
+    st.session_state["options_degraded"] = False
     if ok:
         try:
-            st.session_state["api_options"] = get_options()
+            opts_raw = get_options()
+            # Detect if we fell back to hardcoded defaults (server /options returned 5xx)
+            if opts_raw is _FALLBACK_OPTIONS:
+                st.session_state["options_degraded"] = True
+            st.session_state["api_options"] = opts_raw
         except Exception as e:
             st.session_state["api_options"] = {}
             st.session_state["api_ok"] = False
@@ -55,6 +60,12 @@ with status_col:
     else:
         st.error(f"❌  API Unavailable — {msg}")
 
+if ok and st.session_state.get("options_degraded"):
+    st.warning(
+        "⚠️  The `/digital_formulator/options` endpoint returned a server error (HTTP 500).  "
+        "Simulation endpoints are working — using built-in defaults for the Digital Formulator page."
+    )
+
 if not ok:
     _configured_url = os.getenv("API_BASE_URL", "http://localhost:8000")
     st.warning(f"Configured `API_BASE_URL`: **{_configured_url}**")
@@ -64,7 +75,7 @@ if not ok:
             f"""
 The dashboard tried to reach:
 ```
-{_configured_url}/digital_formulator/options
+{_configured_url}/openapi.json
 ```
 
 **Pick the scenario that matches your setup:**
