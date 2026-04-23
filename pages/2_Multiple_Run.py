@@ -6,13 +6,6 @@ import streamlit as st
 from utils.api_client import get_options, multiple_run, component_label, component_short_name
 from utils.plotting import compressibility_figure, tensile_figure, formulation_pie, formulation_bar
 
-st.set_page_config(page_title="Multiple Run | Digital Formulator", page_icon="\U0001f4c8", layout="wide", initial_sidebar_state="collapsed")
-st.markdown("""
-<style>
-[data-testid="stMetric"]{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:14px 18px !important;}
-[data-testid="stCaptionContainer"]>p{text-transform:uppercase;letter-spacing:.07em;font-size:.69rem !important;font-weight:600;color:rgba(255,255,255,0.4) !important;}
-[data-testid="collapsedControl"]{display:none;}
-</style>""", unsafe_allow_html=True)
 
 if "api_options" not in st.session_state:
     try:
@@ -30,9 +23,11 @@ if not all_components:
 _label_options = [component_label(c) for c in all_components]
 _id_from_label = {component_label(c): c for c in all_components}
 
-st.markdown("# \U0001f4c8 Multiple-Run Simulation")
-st.markdown("Generate a compressibility and tensile-strength **profile across a compaction-pressure range** using Kawakita and Duckworth models.")
-st.divider()
+st.markdown("""
+<div class='page-header'>
+  <div class='ph-title'>\U0001f4c8 Multiple-Run Simulation</div>
+  <div class='ph-sub'>Generate a compressibility and tensile-strength profile across a compaction-pressure range using Kawakita and Duckworth models</div>
+</div>""", unsafe_allow_html=True)
 
 cfg_col, res_col = st.columns([2, 3], gap="large")
 

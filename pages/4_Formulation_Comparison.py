@@ -48,15 +48,12 @@ st.markdown("""
 [data-testid="collapsedControl"]{display:none;}
 </style>""", unsafe_allow_html=True)
 
-st.markdown("# ⚗️ Formulation Comparison")
-st.markdown(
-    "Build and simulate up to **5 formulations** simultaneously.  "
-    "Compare their predicted properties via radar charts, overlaid morphology "
-    "curves, and a side-by-side numeric table."
-)
-st.divider()
+st.markdown("""
+<div class='page-header'>
+  <div class='ph-title'>\u2697\ufe0f Formulation Comparison</div>
+  <div class='ph-sub'>Simulate up to 5 formulations and compare predicted properties via radar charts, PSD/AR overlays, and a numeric table</div>
+</div>""", unsafe_allow_html=True)
 
-# ── API options ───────────────────────────────────────────────────────────
 if "api_options" not in st.session_state:
     try:
         st.session_state["api_options"] = get_options()

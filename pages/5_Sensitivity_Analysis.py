@@ -59,21 +59,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 st.markdown("""
-<style>
-[data-testid="stMetric"]{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:14px 18px !important;}
-[data-testid="stCaptionContainer"]>p{text-transform:uppercase;letter-spacing:.07em;font-size:.69rem !important;font-weight:600;color:rgba(255,255,255,0.4) !important;}
-[data-testid="collapsedControl"]{display:none;}
-</style>""", unsafe_allow_html=True)
+<div class='page-header'>
+  <div class='ph-title'>\U0001f4d0 Sensitivity Analysis</div>
+  <div class='ph-sub'>Sweep one parameter while holding all others fixed to quantify model sensitivity and map design-space boundaries</div>
+</div>""", unsafe_allow_html=True)
 
-st.markdown("# 📐 Sensitivity Analysis")
-st.markdown(
-    "Investigate how model outputs respond when a single parameter "
-    "is swept over a range while all other inputs remain fixed.  "
-    "Useful for understanding model sensitivity and design-space boundaries."
-)
-st.divider()
-
-# ── API options ───────────────────────────────────────────────────────────
 if "api_options" not in st.session_state:
     try:
         st.session_state["api_options"] = get_options()

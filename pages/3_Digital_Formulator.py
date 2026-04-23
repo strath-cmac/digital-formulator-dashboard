@@ -29,30 +29,11 @@ from utils.plotting import (
     pca_bar,
 )
 
-# ── Page config ──────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Digital Formulator | Optimisation",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
 st.markdown("""
-<style>
-[data-testid="stMetric"]{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:14px 18px !important;}
-[data-testid="stCaptionContainer"]>p{text-transform:uppercase;letter-spacing:.07em;font-size:.69rem !important;font-weight:600;color:rgba(255,255,255,0.4) !important;}
-[data-testid="collapsedControl"]{display:none;}
-</style>""", unsafe_allow_html=True)
-
-st.markdown("# 🚀 Digital Formulator — Formulation Optimisation")
-st.markdown(
-    "Use a **multi-objective genetic algorithm (NSGA-II)** or "
-    "**single-objective GA** to find optimal tablet formulations that "
-    "satisfy your process and product constraints.  "
-    "Expect runtimes of **1 – 10 minutes** depending on solver settings."
-)
-st.divider()
-
-# ── Ensure API options are loaded ─────────────────────────────────────────
+<div class='page-header'>
+  <div class='ph-title'>\U0001f680 Formulation Optimisation</div>
+  <div class='ph-sub'>Multi-objective genetic algorithm (NSGA-II) or single-objective GA to find optimal tablet formulations &mdash; expect runtimes of 1&ndash;10 min</div>
+</div>""", unsafe_allow_html=True)
 if "api_options" not in st.session_state:
     try:
         st.session_state["api_options"] = get_options()

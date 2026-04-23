@@ -8,13 +8,6 @@ from utils.api_client import (
 )
 from utils.plotting import psd_figure, ar_figure, pca_bar, formulation_pie
 
-st.set_page_config(page_title="Single Run | Digital Formulator", page_icon="\U0001f52c", layout="wide", initial_sidebar_state="collapsed")
-st.markdown("""
-<style>
-[data-testid="stMetric"]{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:14px 18px !important;}
-[data-testid="stCaptionContainer"]>p{text-transform:uppercase;letter-spacing:.07em;font-size:.69rem !important;font-weight:600;color:rgba(255,255,255,0.4) !important;}
-[data-testid="collapsedControl"]{display:none;}
-</style>""", unsafe_allow_html=True)
 
 # ── API options ───────────────────────────────────────────────────────────
 if "api_options" not in st.session_state:
@@ -33,10 +26,11 @@ if not all_components:
 _label_options = [component_label(c) for c in all_components]
 _id_from_label = {component_label(c): c for c in all_components}
 
-# ── Header ────────────────────────────────────────────────────────────────
-st.markdown("# \U0001f52c Single-Point Simulation")
-st.markdown("Predict granular and tablet properties for a specific formulation at a **fixed compaction pressure**.")
-st.divider()
+st.markdown("""
+<div class='page-header'>
+  <div class='ph-title'>\U0001f52c Single-Point Simulation</div>
+  <div class='ph-sub'>Predict granular and tablet properties for a specific formulation at a fixed compaction pressure</div>
+</div>""", unsafe_allow_html=True)
 
 # ── Layout ────────────────────────────────────────────────────────────────
 cfg_col, res_col = st.columns([2, 3], gap="large")
