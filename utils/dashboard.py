@@ -69,6 +69,8 @@ def refresh_api_state(force_refresh: bool = False) -> Dict[str, Any]:
         st.session_state["api_msg"] = msg
         st.session_state["api_contract"] = get_api_contract(force_refresh=force_refresh) if ok else {}
         st.session_state["api_options"] = get_options(force_refresh=force_refresh) if ok else {}
+    elif st.session_state.get("api_ok", False) and not get_component_choices(st.session_state.get("api_options", {})):
+        st.session_state["api_options"] = get_options(force_refresh=True)
 
     return {
         "ok": st.session_state.get("api_ok", False),

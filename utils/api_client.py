@@ -23,6 +23,7 @@ OPENAPI_TIMEOUT: int = 8
 _SESSION = requests.Session()
 _RESOLVED_BASE_URL: Optional[str] = None
 _LAST_OPTIONS: Dict[str, Any] = {}
+_COMPONENTS_CACHE: Dict[str, Dict[str, str]] = {}
 
 _DEFAULT_FALLBACK_OPTIONS: Dict[str, Any] = {
     "available_components": [],
@@ -73,6 +74,30 @@ def _coerce_string_list(value: Any) -> List[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item).strip()]
+
+
+def _coerce_string_dict(value: Any) -> Dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): str(item) for key, item in value.items() if str(key).strip()}
+
+
+def _dedupe_ids(values: Iterable[str]) -> List[str]:
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for value in values:
+        item = str(value).strip()
+        if item and item not in seen:
+            ordered.append(item)
+            seen.add(item)
+    return ordered
+
+
+def _safe_base_url() -> str:
+    try:
+        return get_base_url()
+    except Exception:
+        return _normalise_url(os.getenv("API_BASE_URL", ""))
 
 
 def _probe_openapi(base_url: str) -> Dict[str, Any]:
@@ -142,6 +167,35 @@ def supports_endpoint(endpoint: str) -> bool:
         return False
 
 
+def get_components(force_refresh: bool = False) -> Dict[str, Dict[str, str]]:
+    if _COMPONENTS_CACHE and not force_refresh:
+        return _COMPONENTS_CACHE
+
+    registry: Dict[str, Dict[str, str]] = {"all": {}, "apis": {}, "excipients": {}}
+    try:
+        raw = _get("/components", timeout=TIMEOUT_MEDIUM)
+        registry["all"] = _coerce_string_dict(raw.get("all"))
+        registry["apis"] = _coerce_string_dict(raw.get("apis"))
+        registry["excipients"] = _coerce_string_dict(raw.get("excipients"))
+    except Exception:
+        registry = {"all": {}, "apis": {}, "excipients": {}}
+
+    if not registry["all"]:
+        registry["all"] = {**registry["excipients"], **registry["apis"]}
+
+    if not registry["excipients"] and registry["all"]:
+        api_ids = set(registry["apis"])
+        registry["excipients"] = {
+            component_id: label
+            for component_id, label in registry["all"].items()
+            if component_id not in api_ids
+        }
+
+    _COMPONENTS_CACHE.clear()
+    _COMPONENTS_CACHE.update(registry)
+    return _COMPONENTS_CACHE
+
+
 def _request(method: str, endpoint: str, timeout: int, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     base_url = get_base_url()
     response = _SESSION.request(
@@ -168,21 +222,51 @@ def _normalise_options(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     global _LAST_OPTIONS
 
     data = raw or {}
-    component_names = data.get("component_names")
-    if not isinstance(component_names, dict):
-        component_names = {}
+    try:
+        registry = get_components()
+    except Exception:
+        registry = {"all": {}, "apis": {}, "excipients": {}}
+
+    registry_all = registry.get("all", {})
+    registry_apis = registry.get("apis", {})
+    registry_excipients = registry.get("excipients", {})
+
+    component_names = {
+        **dict(registry_all),
+        **_coerce_string_dict(data.get("component_names")),
+    }
 
     available_components = _coerce_string_list(data.get("available_components"))
     if not available_components:
+        available_components = _coerce_string_list(data.get("available_materials"))
+    if not available_components:
         available_components = _coerce_string_list(data.get("available_excipients"))
+    if not available_components and registry_all:
+        available_components = list(registry_all.keys())
 
     available_apis = _coerce_string_list(data.get("available_apis"))
-    available_excipients = _coerce_string_list(data.get("available_excipients"))
+    if not available_apis and registry_apis:
+        available_apis = list(registry_apis.keys())
 
-    if available_components and available_excipients and not available_apis:
-        available_excipients = available_components
-    elif available_components and not available_excipients:
-        available_excipients = available_components
+    available_excipients = _coerce_string_list(data.get("available_excipients"))
+    if not available_excipients and registry_excipients:
+        available_excipients = list(registry_excipients.keys())
+
+    available_components = _dedupe_ids([*available_components, *available_apis, *available_excipients])
+    if not available_components and registry_all:
+        available_components = list(registry_all.keys())
+
+    if available_components:
+        component_id_set = set(available_components)
+        available_apis = [cid for cid in available_apis if cid in component_id_set]
+        available_excipients = [cid for cid in available_excipients if cid in component_id_set]
+
+    if available_components and not available_excipients:
+        if registry_excipients:
+            available_excipients = [cid for cid in registry_excipients if cid in set(available_components)]
+        else:
+            api_ids = set(available_apis)
+            available_excipients = [cid for cid in available_components if cid not in api_ids]
 
     current_defaults = data.get("current_defaults")
     if not isinstance(current_defaults, dict):
@@ -197,7 +281,7 @@ def _normalise_options(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "component_names": {str(key): str(value) for key, value in component_names.items()},
         "current_defaults": current_defaults,
         "options_degraded": bool(data.get("options_degraded", False)),
-        "source_base_url": get_base_url(),
+        "source_base_url": _safe_base_url(),
     }
     _LAST_OPTIONS = normalised
     return normalised
