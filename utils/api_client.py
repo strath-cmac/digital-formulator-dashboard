@@ -74,6 +74,7 @@ _FALLBACK_OPTIONS: Dict = {
             {"name": "porosity_minus_std_min", "threshold": 0.14},
             {"name": "ffc_min",                "threshold": 4.0},
             {"name": "tensile_strength_min",   "threshold": 2.0},
+            {"name": "eaoif_max",              "threshold": 41.0},
         ],
         "excipient_options":      ["la3", "la4", "la6", "la8", "la9", "la10",
                                    "ma1", "mc5", "mc6", "mc7", "sh14", "sh15"],

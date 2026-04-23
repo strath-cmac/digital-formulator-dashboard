@@ -56,9 +56,16 @@ st.set_page_config(
     page_title="Sensitivity Analysis | Digital Formulator",
     page_icon="📐",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
+st.markdown("""
+<style>
+[data-testid="stMetric"]{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:14px 18px !important;}
+[data-testid="stCaptionContainer"]>p{text-transform:uppercase;letter-spacing:.07em;font-size:.69rem !important;font-weight:600;color:rgba(255,255,255,0.4) !important;}
+[data-testid="collapsedControl"]{display:none;}
+</style>""", unsafe_allow_html=True)
 
-st.title("📐 Sensitivity Analysis")
+st.markdown("# 📐 Sensitivity Analysis")
 st.markdown(
     "Investigate how model outputs respond when a single parameter "
     "is swept over a range while all other inputs remain fixed.  "
@@ -81,57 +88,56 @@ if not all_excipients:
     st.error("No excipients returned by the API. Is the backend running?")
     st.stop()
 
-# ── Sidebar ───────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.header("📐 Analysis Setup")
+# ── Configuration ────────────────────────────────────────────────────────
+cfg_col, res_col = st.columns([2, 3], gap="large")
 
-    mode: str = st.radio(
-        "Sensitivity Mode",
-        options=["Vary Fraction", "Vary Compaction Pressure"],
-        index=0,
-        help=(
-            "**Vary Fraction** — sweep the weight fraction of one chosen "
-            "excipient; all others are rescaled proportionally.  \n\n"
-            "**Vary Compaction Pressure** — sweep CP across a range with "
-            "a fixed formulation; calls the ML model directly at each point."
-        ),
-    )
-
-    st.divider()
-    st.subheader("Base Formulation")
-
-    _DEFAULTS = ["mc5", "la9", "cc1", "ms1"]
-    safe_defs  = [d for d in _DEFAULTS if d in all_excipients]
-
-    selected: list[str] = st.multiselect(
-        "Components",
-        options=all_excipients,
-        default=safe_defs if safe_defs else all_excipients[:3],
-        format_func=component_label,
-        key="sa_sel",
-    )
-
-    fracs: dict[str, float] = {}
-    if selected:
-        eq_frac = round(1.0 / len(selected), 4)
-        for comp in selected:
-            fracs[comp] = st.number_input(
-                component_label(comp),
-                min_value=0.001,
-                max_value=1.0,
-                value=eq_frac,
-                step=0.005,
-                format="%.4f",
-                key=f"sa_frac_{comp}",
-            )
-        total_f = sum(fracs.values())
-        col = "green" if abs(total_f - 1.0) < 0.005 else "orange"
-        st.markdown(
-            f"Sum: :{col}[{total_f:.4f}]"
-            + (" ✓" if col == "green" else " → will be normalised")
+with cfg_col:
+    with st.container(border=True):
+        st.caption("Sensitivity Mode")
+        mode: str = st.radio(
+            "Sensitivity Mode",
+            options=["Vary Fraction", "Vary Compaction Pressure"],
+            index=0,
+            label_visibility="collapsed",
+            help=(
+                "**Vary Fraction** — sweep the weight fraction of one chosen "
+                "excipient; all others are rescaled proportionally.  \n\n"
+                "**Vary Compaction Pressure** — sweep CP across a range with "
+                "a fixed formulation; calls the ML model directly at each point."
+            ),
         )
 
-    st.divider()
+    with st.container(border=True):
+        st.caption("Base Formulation")
+        _DEFAULTS = ["mc5", "la9", "cc1", "ms1"]
+        safe_defs  = [d for d in _DEFAULTS if d in all_excipients]
+        selected: list[str] = st.multiselect(
+            "Components",
+            options=all_excipients,
+            default=safe_defs if safe_defs else all_excipients[:3],
+            format_func=component_label,
+            key="sa_sel",
+            label_visibility="collapsed",
+            placeholder="Add components…",
+        )
+        fracs: dict[str, float] = {}
+        if selected:
+            eq_frac = round(1.0 / len(selected), 4)
+            for comp in selected:
+                fracs[comp] = st.number_input(
+                    component_label(comp),
+                    min_value=0.001,
+                    max_value=1.0,
+                    value=eq_frac,
+                    step=0.005,
+                    format="%.4f",
+                    key=f"sa_frac_{comp}",
+                )
+            total_f = sum(fracs.values())
+            if abs(total_f - 1.0) < 0.005:
+                st.success(f"Sum: {total_f:.4f} ✓", icon="✅")
+            else:
+                st.warning(f"Sum: {total_f:.4f} → will be normalised", icon="⚠️")
 
     # ── Mode-specific controls ────────────────────────────────────────
     x_label  = ""
@@ -140,39 +146,40 @@ with st.sidebar:
     cp_fixed: float = 200.0
 
     if mode == "Vary Fraction" and selected:
-        st.subheader("Fraction Sweep")
-        vary_comp = st.selectbox(
-            "Component to vary",
-            options=selected,
-            format_func=component_label,
-            key="sa_vary_comp",
-        )
-        frac_min = st.slider("Min fraction", 0.01, 0.80, 0.05, 0.01, key="sa_fmin")
-        frac_max = st.slider(
-            "Max fraction",
-            min_value=float(round(frac_min + 0.05, 2)),
-            max_value=0.95,
-            value=min(0.60, max(float(round(frac_min + 0.10, 2)), 0.50)),
-            step=0.01,
-            key="sa_fmax",
-        )
-        n_pts    = st.slider("Number of evaluation points", 5, 25, 12, key="sa_npts")
-        cp_fixed = st.slider("Fixed CP (MPa)", 50.0, 450.0, 200.0, 5.0, key="sa_cp_fixed")
-        x_label  = f"{component_label(vary_comp)} — fraction"
-        x_range  = np.linspace(frac_min, frac_max, n_pts).tolist()
+        with st.container(border=True):
+            st.caption("Fraction Sweep")
+            vary_comp = st.selectbox(
+                "Component to vary",
+                options=selected,
+                format_func=component_label,
+                key="sa_vary_comp",
+            )
+            frac_min = st.slider("Min fraction", 0.01, 0.80, 0.05, 0.01, key="sa_fmin")
+            frac_max = st.slider(
+                "Max fraction",
+                min_value=float(round(frac_min + 0.05, 2)),
+                max_value=0.95,
+                value=min(0.60, max(float(round(frac_min + 0.10, 2)), 0.50)),
+                step=0.01,
+                key="sa_fmax",
+            )
+            n_pts    = st.slider("Number of evaluation points", 5, 25, 12, key="sa_npts")
+            cp_fixed = st.slider("Fixed CP (MPa)", 50.0, 450.0, 200.0, 5.0, key="sa_cp_fixed")
+            x_label  = f"{component_label(vary_comp)} — fraction"
+            x_range  = np.linspace(frac_min, frac_max, n_pts).tolist()
 
     elif mode == "Vary Compaction Pressure" and selected:
-        st.subheader("CP Sweep")
-        cp_min = st.slider("Min CP (MPa)", 30.0, 300.0, 70.0,  5.0, key="sa_cpmin")
-        cp_max = st.slider("Max CP (MPa)", float(round(cp_min + 20.0, 0)), 450.0, 300.0, 5.0, key="sa_cpmax")
-        n_pts  = st.slider("Number of evaluation points", 5, 25, 12, key="sa_npts_cp")
-        x_label = "Compaction Pressure (MPa)"
-        x_range = np.linspace(cp_min, cp_max, n_pts).tolist()
+        with st.container(border=True):
+            st.caption("CP Sweep")
+            cp_min = st.slider("Min CP (MPa)", 30.0, 300.0, 70.0,  5.0, key="sa_cpmin")
+            cp_max = st.slider("Max CP (MPa)", float(round(cp_min + 20.0, 0)), 450.0, 300.0, 5.0, key="sa_cpmax")
+            n_pts  = st.slider("Number of evaluation points", 5, 25, 12, key="sa_npts_cp")
+            x_label = "Compaction Pressure (MPa)"
+            x_range = np.linspace(cp_min, cp_max, n_pts).tolist()
 
-    st.divider()
     can_run = len(selected) >= 1 and len(x_range) >= 2
     run_btn = st.button(
-        "▶ Run Sensitivity Analysis",
+        "▶  Run Sensitivity Analysis",
         type="primary",
         use_container_width=True,
         disabled=not can_run,
@@ -180,7 +187,9 @@ with st.sidebar:
 
 # ── Guard: not enough inputs ──────────────────────────────────────────────
 if not can_run:
-    st.info("👈  Select components, configure the sweep range, and click **▶ Run Sensitivity Analysis**.")
+    with res_col:
+        with st.container(border=True):
+            st.markdown('<div style="text-align:center;padding:3rem 0;opacity:0.4"><div style="font-size:3rem">📐</div><div style="font-size:1.1rem;margin-top:.5rem">Configure the sweep settings and click <strong>▶ Run Sensitivity Analysis</strong></div></div>', unsafe_allow_html=True)
     st.stop()
 
 # ── Helper: build a single result row ────────────────────────────────────
@@ -287,7 +296,9 @@ if run_btn:
 # ── Guard: no results yet ─────────────────────────────────────────────────
 df: pd.DataFrame | None = st.session_state.get("sa_df")
 if df is None:
-    st.info("Configure the sweep in the sidebar and click **▶ Run Sensitivity Analysis**.")
+    with res_col:
+        with st.container(border=True):
+            st.markdown('<div style="text-align:center;padding:3rem 0;opacity:0.4"><div style="font-size:3rem">📐</div><div style="font-size:1.1rem;margin-top:.5rem">Configure the sweep settings and click <strong>▶ Run Sensitivity Analysis</strong></div></div>', unsafe_allow_html=True)
     st.stop()
 
 x_label_disp: str = st.session_state.get("sa_x_label", "Parameter")

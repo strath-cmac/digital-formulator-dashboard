@@ -39,9 +39,16 @@ st.set_page_config(
     page_title="Formulation Comparison | Digital Formulator",
     page_icon="⚗️",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
+st.markdown("""
+<style>
+[data-testid="stMetric"]{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:14px 18px !important;}
+[data-testid="stCaptionContainer"]>p{text-transform:uppercase;letter-spacing:.07em;font-size:.69rem !important;font-weight:600;color:rgba(255,255,255,0.4) !important;}
+[data-testid="collapsedControl"]{display:none;}
+</style>""", unsafe_allow_html=True)
 
-st.title("⚗️ Formulation Comparison")
+st.markdown("# ⚗️ Formulation Comparison")
 st.markdown(
     "Build and simulate up to **5 formulations** simultaneously.  "
     "Compare their predicted properties via radar charts, overlaid morphology "
@@ -106,78 +113,79 @@ _RADAR_PROPS: list[tuple[str, str]] = [
     ("true_density",                         "True\nDensity"),
 ]
 
-# ── Sidebar ───────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.header("⚗️ Comparison Setup")
-
-    n_forms: int = st.selectbox(
+# ── Configuration ────────────────────────────────────────────────────────
+with st.container(border=True):
+    st.caption("Comparison Setup")
+    hdr_c1, hdr_c2 = st.columns([1, 3])
+    n_forms: int = hdr_c1.selectbox(
         "Number of formulations",
         options=[2, 3, 4, 5],
         index=0,
         key="cf_n",
     )
-
     # Invalidate previous results when the number of slots changes
     if st.session_state.get("_cf_n_prev") != n_forms:
         st.session_state["_cf_n_prev"] = n_forms
         st.session_state.pop("cf_results", None)
 
+    slot_cols = st.columns(n_forms, gap="small")
     configs: list[dict] = []
     for i in range(n_forms):
         lbl = chr(65 + i)  # A, B, C, D, E
-        with st.expander(f"Formulation {lbl}", expanded=(i == 0)):
-            name = st.text_input(
-                "Label", value=f"Formulation {lbl}", key=f"cf_name_{i}"
-            )
-            selected: list[str] = st.multiselect(
-                "Components",
-                options=all_excipients,
-                default=_safe_defaults(all_excipients, i),
-                format_func=component_label,
-                key=f"cf_sel_{i}",
-            )
-
-            fracs: dict[str, float] = {}
-            if selected:
-                eq_frac = round(1.0 / len(selected), 4)
-                for comp in selected:
-                    fracs[comp] = st.number_input(
-                        component_label(comp),
-                        min_value=0.001,
-                        max_value=1.0,
-                        value=eq_frac,
-                        step=0.005,
-                        format="%.4f",
-                        key=f"cf_frac_{i}_{comp}",
-                    )
-                total_f = sum(fracs.values())
-                col = "green" if abs(total_f - 1.0) < 0.005 else "orange"
-                st.markdown(
-                    f"Sum: :{col}[{total_f:.4f}]"
-                    + (" ✓" if col == "green" else " → will be normalised")
+        with slot_cols[i]:
+            with st.container(border=True):
+                st.caption(f"Formulation {lbl}")
+                name = st.text_input(
+                    "Label", value=f"Formulation {lbl}", key=f"cf_name_{i}",
+                    label_visibility="collapsed",
+                )
+                selected: list[str] = st.multiselect(
+                    "Components",
+                    options=all_excipients,
+                    default=_safe_defaults(all_excipients, i),
+                    format_func=component_label,
+                    key=f"cf_sel_{i}",
+                    label_visibility="collapsed",
+                    placeholder="Add components…",
+                )
+                fracs: dict[str, float] = {}
+                if selected:
+                    eq_frac = round(1.0 / len(selected), 4)
+                    for comp in selected:
+                        fracs[comp] = st.number_input(
+                            component_label(comp),
+                            min_value=0.001,
+                            max_value=1.0,
+                            value=eq_frac,
+                            step=0.005,
+                            format="%.4f",
+                            key=f"cf_frac_{i}_{comp}",
+                        )
+                    total_f = sum(fracs.values())
+                    if abs(total_f - 1.0) < 0.005:
+                        st.success(f"Sum: {total_f:.4f} ✓", icon="✅")
+                    else:
+                        st.warning(f"Sum: {total_f:.4f} → normalised", icon="⚠️")
+                cp_val: float = st.slider(
+                    "CP (MPa)", 50.0, 450.0, 200.0, 5.0,
+                    key=f"cf_cp_{i}", format="%.0f MPa",
+                )
+                configs.append(
+                    {"name": name, "comps": list(fracs.keys()), "fracs": fracs, "cp": cp_val}
                 )
 
-            cp_val: float = st.slider(
-                "Compaction Pressure (MPa)",
-                50.0, 450.0, 200.0, 5.0,
-                key=f"cf_cp_{i}",
-            )
-            configs.append(
-                {"name": name, "comps": list(fracs.keys()), "fracs": fracs, "cp": cp_val}
-            )
-
-    st.divider()
-    all_configured = all(len(c["comps"]) >= 1 for c in configs)
-    run_btn = st.button(
-        "▶ Run All Formulations",
-        type="primary",
-        use_container_width=True,
-        disabled=not all_configured,
-    )
+all_configured = all(len(c["comps"]) >= 1 for c in configs)
+run_btn = st.button(
+    "▶  Run All Formulations",
+    type="primary",
+    use_container_width=True,
+    disabled=not all_configured,
+)
 
 # ── Guard: nothing configured ─────────────────────────────────────────────
 if not all_configured:
-    st.info("👈  Select at least one component per formulation slot and click **▶ Run All Formulations**.")
+    with st.container(border=True):
+        st.markdown('<div style="text-align:center;padding:2.5rem 0;opacity:0.4"><div style="font-size:3rem">⚗️</div><div style="font-size:1.1rem;margin-top:.5rem">Select at least one component per slot and click <strong>▶ Run All Formulations</strong></div></div>', unsafe_allow_html=True)
     st.stop()
 
 # ── Run simulations ───────────────────────────────────────────────────────
@@ -225,7 +233,8 @@ if run_btn:
 # ── Guard: no results yet ─────────────────────────────────────────────────
 results: dict = st.session_state.get("cf_results", {})
 if not results:
-    st.info("Configure formulations in the sidebar and click **▶ Run All Formulations**.")
+    with st.container(border=True):
+        st.markdown('<div style="text-align:center;padding:2.5rem 0;opacity:0.4"><div style="font-size:3rem">📊</div><div style="font-size:1.1rem;margin-top:.5rem">Configure formulations above and click <strong>▶ Run All Formulations</strong></div></div>', unsafe_allow_html=True)
     st.stop()
 
 # ── Build comparison DataFrame ─────────────────────────────────────────────
