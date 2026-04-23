@@ -34,19 +34,6 @@ from utils.plotting import (
     formulation_pie,
 )
 
-# ── Page config ──────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Formulation Comparison | Digital Formulator",
-    page_icon="⚗️",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
-st.markdown("""
-<style>
-[data-testid="stMetric"]{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:14px 18px !important;}
-[data-testid="stCaptionContainer"]>p{text-transform:uppercase;letter-spacing:.07em;font-size:.69rem !important;font-weight:600;color:rgba(255,255,255,0.4) !important;}
-[data-testid="collapsedControl"]{display:none;}
-</style>""", unsafe_allow_html=True)
 
 st.markdown("""
 <div class='page-header'>

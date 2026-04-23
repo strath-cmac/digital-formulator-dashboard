@@ -10,7 +10,7 @@ at import time from the environment variable ``API_BASE_URL``
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -71,27 +71,18 @@ _FALLBACK_OPTIONS: Dict = {
     },
 }
 
-# ── Process-level component name cache ─────────────────────────────────
-# Populated on first call to get_components() and reused for the
-# lifetime of the Streamlit worker process.
-_COMP_CACHE: Dict[str, Any] = {}
-
-
 def component_label(cid: str) -> str:
-    """Return a human-readable label for a component ID.
+    """Return a label for a component ID.
 
-    APIs are tagged with '[API]' so they are visually distinct from excipients
-    in every formulation builder dropdown.
+    The backend does not expose a name-lookup endpoint, so the component
+    ID is returned as-is.
     """
-    comp = get_components()
-    name = comp["all"].get(cid, cid)
-    tag = " [API]" if cid in comp["apis"] else ""
-    return f"{name}{tag} ({cid})"
+    return cid
 
 
 def component_short_name(cid: str) -> str:
-    """Return only the name portion (without the ID suffix)."""
-    return get_components()["all"].get(cid, cid)
+    """Return the short name for a component ID (same as the ID)."""
+    return cid
 
 
 # ── Internal helpers ────────────────────────────────────────────────────
@@ -109,42 +100,6 @@ def _post(endpoint: str, payload: Dict, timeout: int = TIMEOUT_SHORT) -> Dict:
 
 
 # ── Public API ──────────────────────────────────────────────────────────
-
-def get_components() -> Dict[str, Dict[str, str]]:
-    """
-    GET /components — returns component registry with APIs and excipients.
-
-    Response shape::
-
-        {
-            "all":        {id: name, ...},   # every material in df_raw
-            "apis":       {id: name, ...},   # valid API IDs for the formulator
-            "excipients": {id: name, ...},   # non-API materials
-        }
-
-    Cached at the process level so the network call is made at most once
-    per Streamlit worker process.
-    """
-    if not _COMP_CACHE:
-        try:
-            result = _get("/components", timeout=TIMEOUT_MEDIUM)
-        except Exception:
-            result = {"all": {}, "apis": {}, "excipients": {}}
-        _COMP_CACHE.update(result)
-    return _COMP_CACHE
-
-
-def get_dataframe(name: str) -> Dict:
-    """
-    GET /data/{name} — retrieve one of the seven core datasets as JSON.
-
-    Valid names: df_raw, df_blend, df_tablet, psd_raw, psd_blend, ar_raw, ar_blend
-
-    - Tabular datasets (df_raw, df_blend, df_tablet) → list of row dicts
-    - Matrix datasets (psd_raw, psd_blend, ar_raw, ar_blend) → column dict
-    """
-    return _get(f"/data/{name}", timeout=TIMEOUT_MEDIUM)
-
 
 def health_check() -> Tuple[bool, str]:
     """Verify the API is reachable by fetching /openapi.json (always available).
@@ -184,26 +139,13 @@ def get_options() -> Dict:
     dashboard remains usable when the API is degraded.
     """
     try:
-        opts = _get("/digital_formulator/options")
+        return _get("/digital_formulator/options")
     except requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code >= 500:
             return _FALLBACK_OPTIONS
         raise
     except Exception:
         return _FALLBACK_OPTIONS
-
-    # /digital_formulator/options may not include available_apis or
-    # component_names — fetch them from /components (cached) instead.
-    if "available_apis" not in opts or "component_names" not in opts:
-        try:
-            comp = get_components()
-            opts.setdefault("available_apis",  sorted(comp["apis"].keys()))
-            opts.setdefault("component_names", comp["all"])
-        except Exception:
-            opts.setdefault("available_apis",  [])
-            opts.setdefault("component_names", {})
-
-    return opts
 
 
 def single_run(

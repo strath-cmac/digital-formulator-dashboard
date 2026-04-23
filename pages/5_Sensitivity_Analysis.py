@@ -51,13 +51,7 @@ _PURPLE = "#a855f7"
 _TEAL   = "#14b8a6"
 _YELLOW = "#eab308"
 
-# ── Page config ──────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Sensitivity Analysis | Digital Formulator",
-    page_icon="📐",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+
 st.markdown("""
 <div class='page-header'>
   <div class='ph-title'>\U0001f4d0 Sensitivity Analysis</div>
