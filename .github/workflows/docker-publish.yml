@@ -1,0 +1,31 @@
+# Builds the Streamlit dashboard Docker image and pushes it to Docker Hub
+# Triggers on every push to the 'main' branch
+
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Check out repository code
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      # 2. Log in to Docker Hub using repository secrets
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 3. Build Dockerfile and push to Docker Hub
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: mosalehian/digital-formulator-dashboard:latest
