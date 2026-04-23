@@ -1,19 +1,3 @@
-"""
-Formulation Comparison Page
-
-Compare up to 5 formulations side-by-side across all granular and tablet
-properties predicted by the Digital Formulator models.
-
-Output tabs
------------
-📊 Properties  — styled numeric comparison table
-🕸️ Radar       — normalised spider chart across key properties
-🔬 PSD Overlay — overlaid particle size distributions
-🔷 AR Overlay  — overlaid aspect ratio distributions
-🍩 Compositions — donut charts per formulation
-⬇ Download    — combined CSV and JSON export
-"""
-
 from __future__ import annotations
 
 import json
@@ -21,366 +5,239 @@ import json
 import pandas as pd
 import streamlit as st
 
-from utils.api_client import (
-    get_options,
-    single_run,
-    component_label,
-    component_short_name,
-    is_api,
+from utils.api_client import single_run
+from utils.dashboard import (
+    build_default_formulation,
+    component_select_maps,
+    derived_metrics,
+    format_component_option,
+    normalise_formulation_frame,
+    refresh_api_state,
+    render_empty_state,
+    render_page_header,
 )
 from utils.plotting import (
-    radar_chart,
-    overlay_psd_figure,
-    overlay_ar_figure,
     formulation_pie,
+    overlay_ar_figure,
+    overlay_psd_figure,
+    radar_chart,
 )
 
 
-st.markdown("""
-<div class='page-header'>
-  <div class='ph-title'>\u2697\ufe0f Formulation Comparison</div>
-  <div class='ph-sub'>Simulate up to 5 formulations and compare predicted properties via radar charts, PSD/AR overlays, and a numeric table</div>
-</div>""", unsafe_allow_html=True)
-
-if "api_options" not in st.session_state:
-    try:
-        st.session_state["api_options"] = get_options()
-    except Exception as e:
-        st.error(f"Cannot reach API: {e}")
-        st.stop()
-
-opts           = st.session_state["api_options"]
-all_excipients = opts.get("available_excipients", [])
-all_apis       = opts.get("available_apis", [])
-all_components = all_apis + all_excipients   # APIs listed first
-
-if not all_components:
-    st.error("No components returned by the API. Is the backend running?")
+api_state = refresh_api_state()
+if not api_state["ok"]:
+    st.error(api_state["msg"])
     st.stop()
 
-# ── Default component sets per slot ──────────────────────────────────────
-_SLOT_DEFAULTS: list[list[str]] = [
-    ["dm1", "mc5", "la9", "cc1", "ms1"],
-    ["dm1", "mc6", "la6", "cc1", "ms1"],
-    ["dm1", "mc7", "la3", "cc1", "ms1"],
-    ["dm1", "mc5", "ma1", "cc1", "ms1"],
-    ["dm1", "mc6", "la8", "cc1", "ms1"],
-]
+contract = api_state["contract"]
+options = api_state["options"]
+
+if "/single_run" not in contract.get("path_map", {}):
+    st.error("The connected backend does not publish the /single_run endpoint used for comparison studies.")
+    st.stop()
+
+display_options, label_to_id = component_select_maps(options)
+if not display_options:
+    st.error("No material components were returned by the API.")
+    st.stop()
 
 
-def _safe_defaults(comp_list: list[str], slot: int) -> list[str]:
-    defs = _SLOT_DEFAULTS[slot % len(_SLOT_DEFAULTS)]
-    safe = [d for d in defs if d in comp_list]
-    return safe if safe else comp_list[: min(3, len(comp_list))]
+def _form_key(index: int) -> str:
+    return f"cmp_form_{index}"
 
 
-# ── Properties shown in the comparison table ──────────────────────────────
-_TABLE_PROPS: list[tuple[str, str]] = [
-    ("true_density",                         "True Density (g/cm³)"),
-    ("bulk_density",                         "Bulk Density (g/cm³)"),
-    ("tapped_density",                       "Tapped Density (g/cm³)"),
-    ("carrs_index",                          "Carr's Index (%)"),
-    ("hausner_ratio",                        "Hausner Ratio"),
-    ("ffc",                                  "FFC"),
-    ("effective_angle_of_internal_friction", "EAOIF (°)"),
-    ("porosity_mean",                        "Porosity Mean"),
-    ("porosity_std",                         "Porosity Std"),
-    ("tensile_mean",                         "Tensile Strength Mean (MPa)"),
-    ("tensile_std",                          "Tensile Strength Std (MPa)"),
-]
+def _cp_key(index: int) -> str:
+    return f"cmp_cp_{index}"
 
-# Properties used in the radar chart (key, short axis label)
-_RADAR_PROPS: list[tuple[str, str]] = [
-    ("ffc",                                  "FFC"),
-    ("tensile_mean",                         "Tensile\nStrength"),
-    ("porosity_mean",                        "Porosity"),
-    ("carrs_index",                          "Carr's\nIndex"),
-    ("hausner_ratio",                        "Hausner\nRatio"),
-    ("effective_angle_of_internal_friction", "EAOIF"),
-    ("true_density",                         "True\nDensity"),
-]
 
-# ── Configuration ────────────────────────────────────────────────────────
-with st.container(border=True):
-    st.caption("Comparison Setup")
-    hdr_c1, hdr_c2 = st.columns([1, 3])
-    n_forms: int = hdr_c1.selectbox(
-        "Number of formulations",
-        options=[2, 3, 4, 5],
-        index=0,
-        key="cf_n",
-    )
-    # Invalidate previous results when the number of slots changes
-    if st.session_state.get("_cf_n_prev") != n_forms:
-        st.session_state["_cf_n_prev"] = n_forms
-        st.session_state.pop("cf_results", None)
+def _name_key(index: int) -> str:
+    return f"cmp_name_{index}"
 
-    slot_cols = st.columns(n_forms, gap="small")
-    configs: list[dict] = []
-    for i in range(n_forms):
-        lbl = chr(65 + i)  # A, B, C, D, E
-        with slot_cols[i]:
-            with st.container(border=True):
-                st.caption(f"Formulation {lbl}")
-                name = st.text_input(
-                    "Label", value=f"Formulation {lbl}", key=f"cf_name_{i}",
-                    label_visibility="collapsed",
-                )
-                selected: list[str] = st.multiselect(
-                    "Components",
-                    options=all_components,
-                    default=_safe_defaults(all_components, i),
-                    format_func=component_label,
-                    key=f"cf_sel_{i}",
-                    label_visibility="collapsed",
-                    placeholder="Add components…",
-                )
-                fracs: dict[str, float] = {}
-                if selected:
-                    eq_frac = round(1.0 / len(selected), 4)
-                    for comp in selected:
-                        fracs[comp] = st.number_input(
-                            component_label(comp),
-                            min_value=0.001,
-                            max_value=1.0,
-                            value=eq_frac,
-                            step=0.005,
-                            format="%.4f",
-                            key=f"cf_frac_{i}_{comp}",
-                        )
-                    total_f = sum(fracs.values())
-                    if abs(total_f - 1.0) < 0.005:
-                        st.success(f"Sum: {total_f:.4f} ✓", icon="✅")
-                    else:
-                        st.warning(f"Sum: {total_f:.4f} → normalised", icon="⚠️")
-                cp_val: float = st.slider(
-                    "CP (MPa)", 50.0, 450.0, 200.0, 5.0,
-                    key=f"cf_cp_{i}", format="%.0f MPa",
-                )
-                configs.append(
-                    {"name": name, "comps": list(fracs.keys()), "fracs": fracs, "cp": cp_val}
-                )
 
-all_configured = all(len(c["comps"]) >= 1 for c in configs)
-run_btn = st.button(
-    "▶  Run All Formulations",
-    type="primary",
-    use_container_width=True,
-    disabled=not all_configured,
+render_page_header(
+    "Formulation comparison",
+    "Run several candidate blends through the same single-run backend endpoint and compare predicted granular, morphology, and tablet responses side by side.",
+    badge="/single_run",
 )
 
-# ── Guard: nothing configured ─────────────────────────────────────────────
-if not all_configured:
-    with st.container(border=True):
-        st.markdown('<div style="text-align:center;padding:2.5rem 0;opacity:0.4"><div style="font-size:3rem">⚗️</div><div style="font-size:1.1rem;margin-top:.5rem">Select at least one component per slot and click <strong>▶ Run All Formulations</strong></div></div>', unsafe_allow_html=True)
-    st.stop()
+setup_left, setup_right = st.columns([1, 2], gap="large")
+with setup_left:
+    n_forms = st.selectbox("Number of candidate formulations", options=[2, 3, 4, 5], index=1)
+with setup_right:
+    st.caption("Each candidate formulation is configured in its own tab. Fractions are normalized before being sent to the backend.")
 
-# ── Run simulations ───────────────────────────────────────────────────────
-if run_btn:
-    results: dict[int, dict] = {}
-    prog = st.progress(0, text="Running simulations…")
-    errors: list[str] = []
+for index in range(n_forms):
+    if _form_key(index) not in st.session_state:
+        st.session_state[_form_key(index)] = build_default_formulation(options)
+    if _cp_key(index) not in st.session_state:
+        st.session_state[_cp_key(index)] = 200.0
+    if _name_key(index) not in st.session_state:
+        st.session_state[_name_key(index)] = f"Formulation {chr(65 + index)}"
 
-    for i, cfg in enumerate(configs):
-        total_frac = sum(cfg["fracs"].values())
-        comps      = cfg["comps"]
-        nfracs     = [v / total_frac for v in cfg["fracs"].values()]
-        titles     = [component_short_name(c) for c in comps]
+tabs = st.tabs([f"Candidate {chr(65 + index)}" for index in range(n_forms)])
+configs: list[dict] = []
 
-        try:
-            res = single_run(
-                titles=titles, components=comps, fractions=nfracs, cp=cfg["cp"]
-            )
-            bd = res["bulk_density"]
-            td = res["tapped_density"]
-            res["carrs_index"]   = (td - bd) / td * 100 if td else 0.0
-            res["hausner_ratio"] = td / bd if bd else 0.0
-            results[i] = {
-                "config": cfg,
-                "result": res,
-                "titles": titles,
-                "fracs":  nfracs,
-                "comps":  comps,
-            }
-        except Exception as e:
-            errors.append(f"**{cfg['name']}**: {e}")
-
-        prog.progress((i + 1) / len(configs), text=f"Completed {cfg['name']}…")
-
-    prog.empty()
-    if errors:
-        for err in errors:
-            st.error(f"Simulation failed — {err}")
-    if results:
-        st.session_state["cf_results"] = results
-    else:
-        st.error("All simulations failed. Check the API connection.")
-        st.stop()
-
-# ── Guard: no results yet ─────────────────────────────────────────────────
-results: dict = st.session_state.get("cf_results", {})
-if not results:
-    with st.container(border=True):
-        st.markdown('<div style="text-align:center;padding:2.5rem 0;opacity:0.4"><div style="font-size:3rem">📊</div><div style="font-size:1.1rem;margin-top:.5rem">Configure formulations above and click <strong>▶ Run All Formulations</strong></div></div>', unsafe_allow_html=True)
-    st.stop()
-
-# ── Build comparison DataFrame ─────────────────────────────────────────────
-sorted_ids   = sorted(results.keys())
-form_names   = [results[i]["config"]["name"] for i in sorted_ids]
-
-rows: dict[str, dict] = {name: {} for name in form_names}
-for i in sorted_ids:
-    name = results[i]["config"]["name"]
-    res  = results[i]["result"]
-    for key, label in _TABLE_PROPS:
-        rows[name][label] = res.get(key, float("nan"))
-
-df_compare            = pd.DataFrame(rows).T
-df_compare.index.name = "Formulation"
-
-# ── Display tabs ──────────────────────────────────────────────────────────
-tab_props, tab_radar, tab_psd, tab_ar, tab_form, tab_dl = st.tabs(
-    ["📊 Properties", "🕸️ Radar", "🔬 PSD Overlay", "🔷 AR Overlay",
-     "🍩 Compositions", "⬇ Download"]
-)
-
-# ── Tab: Properties ───────────────────────────────────────────────────────
-with tab_props:
-    st.subheader("Side-by-Side Property Table")
-    st.dataframe(
-        df_compare.style.format("{:.4f}", na_rep="—"),
-        use_container_width=True,
-        height=min(600, 42 * (len(df_compare) + 2)),
-    )
-    st.caption("Use the radar chart tab for a holistic cross-property view.")
-
-    st.divider()
-    st.subheader("Metric Cards")
-    highlight_prop = st.selectbox(
-        "Property to highlight",
-        [label for _, label in _TABLE_PROPS],
-        index=9,  # Tensile Strength Mean by default
-    )
-    cols = st.columns(len(form_names))
-    for j, (i, name) in enumerate(zip(sorted_ids, form_names)):
-        val = rows[name].get(highlight_prop, float("nan"))
-        cols[j].metric(name, f"{val:.4f}" if val == val else "—")
-
-# ── Tab: Radar ────────────────────────────────────────────────────────────
-with tab_radar:
-    st.subheader("Normalised Radar / Spider Chart")
-    st.markdown(
-        "Each axis is **independently normalised** to [0, 1] across the "
-        "compared formulations.  A larger filled area indicates *relatively* "
-        "higher values on those axes — interpret axis direction using domain knowledge.  \n"
-        "*(Axes do not encode desirability — e.g. lower porosity may be preferable.)*"
-    )
-
-    radar_keys = [k for k, _ in _RADAR_PROPS]
-    radar_lbls = [lbl for _, lbl in _RADAR_PROPS]
-    matrix = [
-        [results[i]["result"].get(k, 0.0) for k in radar_keys]
-        for i in sorted_ids
-    ]
-    st.plotly_chart(
-        radar_chart(form_names, matrix, radar_lbls),
-        use_container_width=True,
-    )
-
-    # Mini reference table below the chart
-    with st.expander("📖 Axis reference values (raw)"):
-        ref_rows = {
-            lbl: {name: results[i]["result"].get(key, float("nan"))
-                  for i, name in zip(sorted_ids, form_names)}
-            for key, lbl in _RADAR_PROPS
-        }
-        st.dataframe(
-            pd.DataFrame(ref_rows).T.style.format("{:.4f}", na_rep="—"),
-            use_container_width=True,
-        )
-
-# ── Tab: PSD Overlay ──────────────────────────────────────────────────────
-with tab_psd:
-    st.subheader("Particle Size Distribution Comparison")
-    psd_datasets = [
-        (
-            results[i]["config"]["name"],
-            results[i]["result"]["ce_diameter"],
-            results[i]["result"]["particle_size_dist"],
-        )
-        for i in sorted_ids
-    ]
-    st.plotly_chart(overlay_psd_figure(psd_datasets), use_container_width=True)
-    st.caption(
-        "Curves show the predicted blend PSD computed by the mixture model from "
-        "raw material PSD data.  Differences reflect how excipient choice and "
-        "relative fractions reshape the blend particle size distribution."
-    )
-
-# ── Tab: AR Overlay ───────────────────────────────────────────────────────
-with tab_ar:
-    st.subheader("Aspect Ratio Distribution Comparison")
-    ar_datasets = [
-        (
-            results[i]["config"]["name"],
-            results[i]["result"]["Aspect Ratio"],
-            results[i]["result"]["aspect_ratio_dist"],
-        )
-        for i in sorted_ids
-    ]
-    st.plotly_chart(overlay_ar_figure(ar_datasets), use_container_width=True)
-    st.caption(
-        "Aspect ratio reflects particle shape.  Values close to 1 = near-spherical; "
-        "higher values indicate more elongated or irregular particles."
-    )
-
-# ── Tab: Compositions ─────────────────────────────────────────────────────
-with tab_form:
-    st.subheader("Formulation Compositions")
-    n_cols = min(len(sorted_ids), 3)
-    cols   = st.columns(n_cols)
-    for j, i in enumerate(sorted_ids):
-        with cols[j % n_cols]:
-            cfg = results[i]["config"]
-            cp_used = cfg["cp"]
-            st.caption(f"**{cfg['name']}**  ·  CP = {cp_used:.0f} MPa")
-            st.plotly_chart(
-                formulation_pie(
-                    [component_label(c) for c in results[i]["comps"]],
-                    results[i]["fracs"],
-                ),
+for index, tab in enumerate(tabs):
+    with tab:
+        left, right = st.columns([3, 1], gap="large")
+        with left:
+            st.text_input("Label", key=_name_key(index))
+            edited_df = st.data_editor(
+                st.session_state[_form_key(index)],
+                key=f"cmp_editor_{index}",
                 use_container_width=True,
-            )
-
-# ── Tab: Download ─────────────────────────────────────────────────────────
-with tab_dl:
-    st.subheader("Export Comparison Data")
-
-    csv_data = df_compare.reset_index().to_csv(index=False)
-    st.download_button(
-        "⬇ Download CSV (property table)",
-        data=csv_data,
-        file_name="formulation_comparison.csv",
-        mime="text/csv",
-    )
-
-    json_data = json.dumps(
-        {
-            results[i]["config"]["name"]: {
-                "config": {
-                    "components": results[i]["comps"],
-                    "fractions":  results[i]["fracs"],
-                    "cp_mpa":     results[i]["config"]["cp"],
+                num_rows="dynamic",
+                hide_index=True,
+                column_config={
+                    "Component": st.column_config.SelectboxColumn("Component", options=display_options, required=True, width="large"),
+                    "Fraction": st.column_config.NumberColumn("Fraction (w/w)", min_value=0.0001, max_value=1.0, step=0.005, format="%.4f", width="small"),
                 },
-                "properties": results[i]["result"],
+            )
+            st.session_state[_form_key(index)] = edited_df
+        with right:
+            st.slider("Compaction pressure", min_value=50.0, max_value=450.0, step=5.0, key=_cp_key(index))
+            if st.button("Reset", key=f"cmp_reset_{index}", use_container_width=True):
+                st.session_state[_form_key(index)] = build_default_formulation(options)
+                st.rerun()
+            valid_df = edited_df.dropna(subset=["Component", "Fraction"])
+            total_fraction = float(pd.to_numeric(valid_df["Fraction"], errors="coerce").fillna(0).sum())
+            if abs(total_fraction - 1.0) < 0.01:
+                st.success(f"Total = {total_fraction:.4f}")
+            else:
+                st.warning(f"Total = {total_fraction:.4f}")
+
+        configs.append(
+            {
+                "name": st.session_state[_name_key(index)],
+                "frame": st.session_state[_form_key(index)],
+                "cp": st.session_state[_cp_key(index)],
             }
-            for i in sorted_ids
-        },
-        indent=2,
+        )
+
+run_clicked = st.button("Run comparison study", type="primary", use_container_width=True)
+
+if run_clicked:
+    results: list[dict] = []
+    progress = st.progress(0, text="Running comparison simulations")
+    errors: list[str] = []
+    for idx, config in enumerate(configs):
+        try:
+            payload = normalise_formulation_frame(config["frame"], label_to_id)
+            response = single_run(
+                titles=payload.titles,
+                components=payload.components,
+                fractions=payload.fractions,
+                cp=float(config["cp"]),
+            )
+            results.append(
+                {
+                    "name": config["name"],
+                    "cp": float(config["cp"]),
+                    "components": payload.components,
+                    "fractions": payload.fractions,
+                    "result": response,
+                    "metrics": derived_metrics(response),
+                }
+            )
+        except Exception as exc:
+            errors.append(f"{config['name']}: {exc}")
+
+        progress.progress((idx + 1) / len(configs), text=f"Completed {idx + 1} of {len(configs)} formulations")
+
+    progress.empty()
+    for error in errors:
+        st.warning(error)
+
+    if results:
+        st.session_state["cmp_results"] = results
+    else:
+        st.error("All comparison runs failed.")
+
+results = st.session_state.get("cmp_results", [])
+if not results:
+    render_empty_state("⚗️", "No comparison results yet", "Configure at least two candidate formulations and run the live backend simulations.")
+    st.stop()
+
+summary_rows = []
+for item in results:
+    result = item["result"]
+    metrics = item["metrics"]
+    summary_rows.append(
+        {
+            "Formulation": item["name"],
+            "CP (MPa)": item["cp"],
+            "True density": result["true_density"],
+            "Bulk density": result["bulk_density"],
+            "Tapped density": result["tapped_density"],
+            "FFC": result["ffc"],
+            "EAOIF": result["effective_angle_of_internal_friction"],
+            "Carr's index": metrics["carrs_index"],
+            "Hausner ratio": metrics["hausner_ratio"],
+            "Porosity mean": result["porosity_mean"],
+            "Tensile mean": result["tensile_mean"],
+        }
     )
+
+summary_df = pd.DataFrame(summary_rows)
+tab_table, tab_radar, tab_psd, tab_ar, tab_form, tab_raw = st.tabs(
+    ["Property table", "Radar", "PSD overlay", "Aspect-ratio overlay", "Compositions", "Raw export"]
+)
+
+with tab_table:
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+with tab_radar:
+    radar_keys = [
+        ("FFC", "FFC"),
+        ("Tensile mean", "Tensile\nmean"),
+        ("Porosity mean", "Porosity"),
+        ("Carr's index", "Carr's\nindex"),
+        ("Hausner ratio", "Hausner\nratio"),
+        ("EAOIF", "EAOIF"),
+        ("True density", "True\ndensity"),
+    ]
+    matrix = [[float(row[key]) for key, _ in radar_keys] for _, row in summary_df.iterrows()]
+    st.plotly_chart(
+        radar_chart(summary_df["Formulation"].tolist(), matrix, [label for _, label in radar_keys]),
+        use_container_width=True,
+    )
+
+with tab_psd:
+    datasets = [
+        (item["name"], item["result"]["ce_diameter"], item["result"]["particle_size_dist"])
+        for item in results
+    ]
+    st.plotly_chart(overlay_psd_figure(datasets), use_container_width=True)
+
+with tab_ar:
+    datasets = [
+        (item["name"], item["result"]["Aspect Ratio"], item["result"]["aspect_ratio_dist"])
+        for item in results
+    ]
+    st.plotly_chart(overlay_ar_figure(datasets), use_container_width=True)
+
+with tab_form:
+    columns = st.columns(min(3, len(results)))
+    for idx, item in enumerate(results):
+        with columns[idx % len(columns)]:
+            st.caption(f"{item['name']} · {item['cp']:.0f} MPa")
+            chart_labels = [format_component_option(component_id, options) for component_id in item["components"]]
+            st.plotly_chart(formulation_pie(chart_labels, item["fractions"]), use_container_width=True)
+
+with tab_raw:
+    export_payload = {
+        item["name"]: {
+            "cp": item["cp"],
+            "components": item["components"],
+            "fractions": item["fractions"],
+            "result": item["result"],
+        }
+        for item in results
+    }
     st.download_button(
-        "⬇ Download JSON (full results)",
-        data=json_data,
+        "Download JSON",
+        data=json.dumps(export_payload, indent=2).encode("utf-8"),
         file_name="formulation_comparison.json",
         mime="application/json",
     )
+    st.json(export_payload)

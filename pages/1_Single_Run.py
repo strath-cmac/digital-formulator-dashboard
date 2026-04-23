@@ -1,4 +1,3 @@
-"""Single-Point Simulation — predict all blend and tablet properties at a fixed CP."""
 from __future__ import annotations
 
 import json
@@ -6,378 +5,233 @@ import json
 import pandas as pd
 import streamlit as st
 
-from utils.api_client import (
-    get_options,
-    single_run,
-    component_label,
-    component_short_name,
-    ffc_v3,
-    ffc_v4_class,
-    is_api,
+from utils.api_client import ffc_v3, ffc_v4_class, single_run, supports_endpoint
+from utils.dashboard import (
+    build_default_formulation,
+    component_select_maps,
+    derived_metrics,
+    format_component_option,
+    normalise_formulation_frame,
+    refresh_api_state,
+    render_empty_state,
+    render_page_header,
+    summarise_formulation,
 )
-from utils.plotting import psd_figure, ar_figure, pca_bar, formulation_pie
+from utils.plotting import ar_figure, formulation_bar, formulation_pie, pca_bar, psd_figure
 
 
-# ── Load API options once per session ────────────────────────────────────────
-if "api_options" not in st.session_state:
-    try:
-        st.session_state["api_options"] = get_options()
-    except Exception as exc:
-        st.error(f"Cannot reach the Digital Formulator API: {exc}")
-        st.stop()
-
-opts           = st.session_state["api_options"]
-all_excipients = opts.get("available_excipients", [])
-all_apis       = opts.get("available_apis", [])
-all_components = all_apis + all_excipients   # APIs listed first
-
-if not all_components:
-    st.error(
-        "The API returned no components. "
-        "Check that the backend is running and the material database is accessible."
-    )
+api_state = refresh_api_state()
+if not api_state["ok"]:
+    st.error(api_state["msg"])
     st.stop()
 
-# Build label ↔ ID mappings for the data editor drop-downs
-_label_options = [component_label(c) for c in all_components]
-_id_from_label = {component_label(c): c for c in all_components}
+contract = api_state["contract"]
+options = api_state["options"]
 
-# ── Page header ───────────────────────────────────────────────────────────────
-st.markdown("""
-<div class='page-header'>
-  <div class='ph-title'>🔬 Single-Point Simulation</div>
-  <div class='ph-sub'>Predict granular and tablet properties for a formulation at a fixed compaction pressure</div>
-</div>""", unsafe_allow_html=True)
+if "/single_run" not in contract.get("path_map", {}):
+    st.error("The connected backend does not publish the /single_run endpoint.")
+    st.stop()
 
-# ── Layout ────────────────────────────────────────────────────────────────────
-cfg_col, res_col = st.columns([2, 3], gap="large")
+display_options, label_to_id = component_select_maps(options)
+if not display_options:
+    st.error("No material components were returned by the API.")
+    st.stop()
 
-# ── Sensible default formulation (API 20 % + fillers + dis + lub) ─────────────
-_DEFAULT_IDS = ["mc5", "la9", "cc1", "ms1"]
-_DEFAULT_FRACS = [0.71, 0.20, 0.08, 0.01]
+if "sr_form_df" not in st.session_state:
+    st.session_state["sr_form_df"] = build_default_formulation(options)
 
-def _build_default_df() -> pd.DataFrame:
-    """Return an initial formulation DataFrame, falling back gracefully."""
-    # Try the canonical defaults first
-    pairs = [
-        (c, f) for c, f in zip(_DEFAULT_IDS, _DEFAULT_FRACS)
-        if c in all_components
-    ]
-    if not pairs:
-        # Fall back to first 4 available components with equal fractions
-        n = min(4, len(all_components))
-        pairs = [(all_components[i], round(1.0 / n, 4)) for i in range(n)]
-    # Add any known API at 20 % if defaults are only excipients
-    if pairs and all_apis and not any(is_api(c) for c, _ in pairs):
-        api_id = all_apis[0]
-        pairs = [(api_id, 0.20)] + [(c, round(f * 0.80, 4)) for c, f in pairs]
-    comps, fracs = zip(*pairs) if pairs else ([], [])
-    return pd.DataFrame({
-        "Component": [component_label(c) for c in comps],
-        "Fraction":  list(fracs),
-    })
+default_cp_bounds = options.get("current_defaults", {}).get("cp_bounds", [70.0, 250.0])
+cp_lower = float(default_cp_bounds[0]) if len(default_cp_bounds) == 2 else 70.0
+cp_upper = float(default_cp_bounds[1]) if len(default_cp_bounds) == 2 else 250.0
+cp_default = float(round((cp_lower + cp_upper) / 2.0, 1))
 
+render_page_header(
+    "Single-point simulation",
+    "Predict blend flowability, density, PSD, particle shape, tablet porosity, and tensile strength for one formulation at a fixed compaction pressure.",
+    badge="/single_run",
+)
 
-with cfg_col:
-    # ── Formulation builder ──────────────────────────────────────────────
-    with st.container(border=True):
-        st.caption("Formulation")
-        st.markdown("#### Build your formulation")
-        st.caption(
-            "Typical tablet: API (~20 %) · Filler(s) · "
-            "Disintegrant (~8 %) · Lubricant (~1 %)"
-        )
+config_col, result_col = st.columns([1.1, 1.5], gap="large")
 
-        if "sr_form_df" not in st.session_state:
-            st.session_state["sr_form_df"] = _build_default_df()
+with config_col:
+    top_left, top_right = st.columns([2, 1])
+    with top_left:
+        st.caption("Formulation builder")
+    with top_right:
+        if st.button("Reset defaults", use_container_width=True):
+            st.session_state["sr_form_df"] = build_default_formulation(options)
+            st.session_state.pop("sr_result", None)
+            st.rerun()
 
-        edited_df = st.data_editor(
-            st.session_state["sr_form_df"],
-            column_config={
-                "Component": st.column_config.SelectboxColumn(
-                    "Component",
-                    options=_label_options,
-                    required=True,
-                    width="large",
-                    help="Select a component from the material database.",
-                ),
-                "Fraction": st.column_config.NumberColumn(
-                    "Fraction (w/w)",
-                    min_value=0.001,
-                    max_value=1.0,
-                    step=0.005,
-                    format="%.4f",
-                    width="small",
-                ),
-            },
-            num_rows="dynamic",
-            use_container_width=True,
-            key="sr_form_editor",
-            hide_index=True,
-        )
-        st.session_state["sr_form_df"] = edited_df
-
-        valid_rows  = edited_df.dropna(subset=["Component", "Fraction"])
-        total_frac  = float(valid_rows["Fraction"].sum()) if not valid_rows.empty else 0.0
-        if abs(total_frac - 1.0) < 0.005:
-            st.success(f"Sum: **{total_frac:.4f}** ✓", icon="✅")
-        else:
-            st.warning(f"Sum: **{total_frac:.4f}** — will be normalised before sending", icon="⚠️")
-
-    # ── Compaction pressure ──────────────────────────────────────────────
-    with st.container(border=True):
-        st.caption("Process Parameter")
-        st.markdown("#### Compaction Pressure")
-        cp = st.slider(
-            "CP (MPa)",
-            min_value=50.0, max_value=450.0,
-            value=200.0, step=5.0,
-            label_visibility="collapsed",
-            format="%.0f MPa",
-            help="Punch compaction pressure applied during tablet manufacture.",
-        )
-        st.markdown(f"**Selected:** {cp:.0f} MPa")
-
-    # ── Options ──────────────────────────────────────────────────────────
-    with st.container(border=True):
-        st.caption("Options")
-        fetch_ffc_models = st.toggle(
-            "Compare FFC model versions (v1 / v3 / v4)",
-            value=False,
-            help=(
-                "Calls two additional API endpoints (/ffc_new, /ffc_class). "
-                "Shows how the three FFC model generations compare on this formulation."
-            ),
-        )
-
-    n_valid = len(valid_rows)
-    run_btn = st.button(
-        "▶  Run Simulation",
-        type="primary",
+    edited_df = st.data_editor(
+        st.session_state["sr_form_df"],
+        key="sr_editor",
         use_container_width=True,
-        disabled=n_valid < 1,
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "Component": st.column_config.SelectboxColumn(
+                "Component",
+                options=display_options,
+                required=True,
+                width="large",
+                help="Material identifiers come from the live API options payload.",
+            ),
+            "Fraction": st.column_config.NumberColumn(
+                "Fraction (w/w)",
+                min_value=0.0001,
+                max_value=1.0,
+                step=0.005,
+                format="%.4f",
+                width="small",
+            ),
+        },
     )
+    st.session_state["sr_form_df"] = edited_df
 
-# ── Run ───────────────────────────────────────────────────────────────────────
-if run_btn:
-    vr          = edited_df.dropna(subset=["Component", "Fraction"])
-    comp_labels = vr["Component"].tolist()
-    comp_ids    = [_id_from_label[lbl] for lbl in comp_labels if lbl in _id_from_label]
-    frac_vals   = [float(v) for v in vr["Fraction"].tolist()]
-    total_frac  = sum(frac_vals)
-    norm_fracs  = [f / total_frac for f in frac_vals]
-    titles_list = [component_short_name(c) for c in comp_ids]
+    valid_df = edited_df.dropna(subset=["Component", "Fraction"])
+    total_fraction = float(pd.to_numeric(valid_df["Fraction"], errors="coerce").fillna(0).sum())
+    if abs(total_fraction - 1.0) < 0.01:
+        st.success(f"Total fraction = {total_fraction:.4f}")
+    else:
+        st.warning(f"Total fraction = {total_fraction:.4f}. Values will be normalized before submission.")
 
-    with res_col:
-        with st.spinner("Running simulation…"):
-            try:
-                result = single_run(
-                    titles=titles_list,
-                    components=comp_ids,
-                    fractions=norm_fracs,
-                    cp=cp,
-                )
-                st.session_state.update({
-                    "sr_result":   result,
-                    "sr_titles":   titles_list,
-                    "sr_fracs":    norm_fracs,
-                    "sr_comp_ids": comp_ids,
-                    "sr_cp":       cp,
-                })
-                if fetch_ffc_models:
-                    st.session_state["sr_ffc_v3"] = ffc_v3(
-                        titles=titles_list, components=comp_ids, fractions=norm_fracs
-                    )
-                    st.session_state["sr_ffc_v4"] = ffc_v4_class(
-                        titles=titles_list, components=comp_ids, fractions=norm_fracs
-                    )
-                else:
-                    st.session_state.pop("sr_ffc_v3", None)
-                    st.session_state.pop("sr_ffc_v4", None)
-            except Exception as exc:
-                st.error(f"Simulation failed: {exc}")
+    with st.container(border=True):
+        st.caption("Process settings")
+        cp = st.slider(
+            "Compaction pressure (MPa)",
+            min_value=30.0,
+            max_value=450.0,
+            value=min(max(cp_default, 30.0), 450.0),
+            step=5.0,
+        )
+        st.write(f"Selected pressure: {cp:.0f} MPa")
 
-# ── Results ───────────────────────────────────────────────────────────────────
+    with st.container(border=True):
+        st.caption("Optional model comparison")
+        extra_ffc_supported = supports_endpoint("/ffc_new") or supports_endpoint("/ffc_class")
+        compare_ffc = st.toggle(
+            "Compare FFC auxiliary endpoints",
+            value=False,
+            disabled=not extra_ffc_supported,
+            help="Calls /ffc_new and /ffc_class when they are available on the connected backend.",
+        )
+        if not extra_ffc_supported:
+            st.info("The connected backend does not currently expose the auxiliary FFC comparison endpoints.")
+
+    run_disabled = len(valid_df) == 0
+    run_clicked = st.button("Run single-point simulation", type="primary", use_container_width=True, disabled=run_disabled)
+
+if run_clicked:
+    try:
+        payload = normalise_formulation_frame(edited_df, label_to_id)
+        result = single_run(
+            titles=payload.titles,
+            components=payload.components,
+            fractions=payload.fractions,
+            cp=cp,
+        )
+        st.session_state["sr_payload"] = {
+            "components": payload.components,
+            "titles": payload.titles,
+            "fractions": payload.fractions,
+            "summary": summarise_formulation(payload, options),
+            "cp": cp,
+        }
+        st.session_state["sr_result"] = result
+        st.session_state["sr_ffc_v3"] = ffc_v3(payload.titles, payload.components, payload.fractions) if compare_ffc else None
+        st.session_state["sr_ffc_v4"] = ffc_v4_class(payload.titles, payload.components, payload.fractions) if compare_ffc else None
+    except Exception as exc:
+        st.error(f"Simulation failed: {exc}")
+
 result = st.session_state.get("sr_result")
-with res_col:
+payload_info = st.session_state.get("sr_payload", {})
+
+with result_col:
     if result is None:
-        with st.container(border=True):
-            st.markdown(
-                '<div style="text-align:center;padding:3rem 0;opacity:0.4">'
-                '<div style="font-size:3rem">🔬</div>'
-                '<div style="font-size:1.1rem;margin-top:.5rem">'
-                'Configure the formulation and click <strong>▶ Run Simulation</strong>'
-                "</div></div>",
-                unsafe_allow_html=True,
-            )
+        render_empty_state("🔬", "No simulation yet", "Build a formulation, set a compaction pressure, and run the live /single_run endpoint.")
         st.stop()
 
-    cp_used   = st.session_state.get("sr_cp", 200.0)
-    bd        = result["bulk_density"]
-    td        = result["tapped_density"]
-    ci        = (td - bd) / td * 100 if td else 0.0
-    hr        = td / bd if bd else 0.0
-    ffc_val   = result["ffc"]
-    eaoif_val = result.get("effective_angle_of_internal_friction", 0.0)
-    flow_class = (
-        "Free-flowing" if ffc_val > 10 else
-        "Easy-flowing" if ffc_val > 4  else
-        "Cohesive"     if ffc_val > 2  else
-        "Very cohesive"
+    metrics = derived_metrics(result)
+    st.caption(f"Formulation: {payload_info.get('summary', '')}")
+    st.caption(f"Compaction pressure: {payload_info.get('cp', cp):.0f} MPa")
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("True density", f"{result['true_density']:.4f} g/cm³")
+    k2.metric("Bulk density", f"{result['bulk_density']:.4f} g/cm³")
+    k3.metric("Tapped density", f"{result['tapped_density']:.4f} g/cm³")
+    k4.metric("FFC", f"{result['ffc']:.3f}")
+
+    k5, k6, k7, k8 = st.columns(4)
+    k5.metric("Carr's index", f"{metrics['carrs_index']:.2f} %")
+    k6.metric("Hausner ratio", f"{metrics['hausner_ratio']:.3f}")
+    k7.metric("Porosity mean", f"{result['porosity_mean']:.4f}")
+    k8.metric("Tensile mean", f"{result['tensile_mean']:.3f} MPa")
+
+    tab_overview, tab_morphology, tab_formulation, tab_raw = st.tabs(
+        ["Overview", "Morphology", "Formulation", "Raw output"]
     )
 
-    st.markdown(f"### Results  ·  {cp_used:.0f} MPa")
-    st.caption(
-        "Formulation: "
-        + " · ".join(
-            f"{component_label(c)} ({f:.3f})"
-            for c, f in zip(
-                st.session_state.get("sr_comp_ids", []),
-                st.session_state.get("sr_fracs", []),
+    with tab_overview:
+        left, right = st.columns([1.2, 1], gap="large")
+        with left:
+            info_a, info_b = st.columns(2)
+            info_a.info(
+                f"Flow classification: {metrics['flow_class']}\n\n"
+                f"EAOIF = {result['effective_angle_of_internal_friction']:.2f}°"
             )
-        )
-    )
-
-    tab_gran, tab_tablet, tab_morph, tab_form, tab_raw = st.tabs([
-        "⚖️ Granular", "💊 Tablet", "🔬 Morphology", "🍩 Formulation", "📋 Raw Data",
-    ])
-
-    # ── Granular properties ──────────────────────────────────────────────
-    with tab_gran:
-        r1, r2, r3, r4 = st.columns(4)
-        r1.metric("True Density",   f"{result['true_density']:.4f} g/cm³")
-        r2.metric("Bulk Density",   f"{result['bulk_density']:.4f} g/cm³")
-        r3.metric("Tapped Density", f"{result['tapped_density']:.4f} g/cm³")
-        r4.metric("Carr's Index",   f"{ci:.2f} %")
-
-        r5, r6, r7, r8 = st.columns(4)
-        r5.metric("Hausner Ratio",  f"{hr:.4f}")
-        r6.metric("FFC",            f"{ffc_val:.4f}")
-        r7.metric("EAOIF",          f"{eaoif_val:.4f} °")
-        r8.metric("Flow Class",     flow_class)
-
-        if eaoif_val > 41.0:
-            st.warning(
-                f"EAOIF = {eaoif_val:.2f}° exceeds the recommended maximum of **41°** "
-                "(higher values indicate poorer powder flow through hoppers).",
-                icon="⚠️",
+            info_b.info(
+                f"Tensile window: {metrics['tensile_lower']:.3f} to {metrics['tensile_upper']:.3f} MPa\n\n"
+                f"Porosity window: {metrics['porosity_lower']:.4f} to {metrics['porosity_upper']:.4f}"
             )
+            if result["effective_angle_of_internal_friction"] > 41.0:
+                st.warning("EAOIF exceeds the common 41° practical threshold for robust hopper flow.")
+            if result["tensile_mean"] < 1.0:
+                st.warning("Predicted tensile strength is low for a conventional direct-compression tablet.")
 
-        with st.expander("ℹ️  Classification Guides"):
-            g1, g2 = st.columns(2)
-            with g1:
-                st.markdown("**FFC → Flow class**")
-                st.markdown(
-                    "| FFC | Class |\n|---|---|\n"
-                    "| > 10 | Free-flowing |\n| 4 – 10 | Easy-flowing |\n"
-                    "| 2 – 4 | Cohesive |\n| < 2 | Very cohesive |"
-                )
-            with g2:
-                st.markdown("**Carr's Index → Flowability**")
-                st.markdown(
-                    "| CI (%) | Class |\n|---|---|\n"
-                    "| < 10 | Excellent |\n| 11 – 15 | Good |\n"
-                    "| 16 – 20 | Fair |\n| 21 – 25 | Passable |\n| > 25 | Poor |"
-                )
+        with right:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Flow class", metrics["flow_class"])
+            if st.session_state.get("sr_ffc_v3") is not None:
+                c2.metric("FFC v3", f"{st.session_state['sr_ffc_v3']:.3f}")
+            if st.session_state.get("sr_ffc_v4") is not None:
+                c3.metric("FFC class", st.session_state["sr_ffc_v4"])
 
-        ffc_v3_val = st.session_state.get("sr_ffc_v3")
-        ffc_v4_lbl = st.session_state.get("sr_ffc_v4")
-        if ffc_v3_val is not None or ffc_v4_lbl is not None:
-            st.divider()
-            st.caption("FFC model comparison — v1 · v3 · v4")
-            mc1, mc2, mc3 = st.columns(3)
-            mc1.metric("FFC v1 — 1st-gen regression", f"{ffc_val:.4f}")
-            if ffc_v3_val is not None:
-                mc2.metric(
-                    "FFC v3 — 2nd-gen regression",
-                    f"{ffc_v3_val:.4f}",
-                    delta=f"{ffc_v3_val - ffc_val:+.4f} vs v1",
-                )
-            if ffc_v4_lbl is not None:
-                mc3.metric("FFC v4 — classification label", ffc_v4_lbl)
+            scalar_rows = [
+                {"Property": "True density", "Value": result["true_density"], "Unit": "g/cm³"},
+                {"Property": "Bulk density", "Value": result["bulk_density"], "Unit": "g/cm³"},
+                {"Property": "Tapped density", "Value": result["tapped_density"], "Unit": "g/cm³"},
+                {"Property": "FFC", "Value": result["ffc"], "Unit": "-"},
+                {"Property": "EAOIF", "Value": result["effective_angle_of_internal_friction"], "Unit": "°"},
+                {"Property": "Porosity mean", "Value": result["porosity_mean"], "Unit": "-"},
+                {"Property": "Porosity std", "Value": result["porosity_std"], "Unit": "-"},
+                {"Property": "Tensile mean", "Value": result["tensile_mean"], "Unit": "MPa"},
+                {"Property": "Tensile std", "Value": result["tensile_std"], "Unit": "MPa"},
+            ]
+            st.dataframe(pd.DataFrame(scalar_rows), use_container_width=True, hide_index=True)
 
-    # ── Tablet properties ────────────────────────────────────────────────
-    with tab_tablet:
-        tc1, tc2, tc3, tc4 = st.columns(4)
-        tc1.metric("Porosity Mean", f"{result['porosity_mean']:.4f}")
-        tc2.metric("Porosity Std",  f"{result['porosity_std']:.4f}")
-        tc3.metric("Tensile Mean",  f"{result['tensile_mean']:.4f} MPa")
-        tc4.metric("Tensile Std",   f"{result['tensile_std']:.4f} MPa")
+    with tab_morphology:
+        plot_left, plot_right = st.columns(2, gap="large")
+        with plot_left:
+            st.plotly_chart(psd_figure(result["ce_diameter"], result["particle_size_dist"]), use_container_width=True)
+            st.plotly_chart(pca_bar(result["PCs_PSD"], "PSD principal component scores"), use_container_width=True)
+        with plot_right:
+            st.plotly_chart(ar_figure(result["Aspect Ratio"], result["aspect_ratio_dist"]), use_container_width=True)
+            st.plotly_chart(pca_bar(result["PCs_AR"], "Aspect-ratio principal component scores"), use_container_width=True)
 
-        ts_lo  = result["tensile_mean"]  - result["tensile_std"]
-        ts_hi  = result["tensile_mean"]  + result["tensile_std"]
-        por_lo = result["porosity_mean"] - result["porosity_std"]
-        por_hi = result["porosity_mean"] + result["porosity_std"]
+    with tab_formulation:
+        chart_left, chart_right = st.columns(2, gap="large")
+        chart_labels = [format_component_option(component_id, options) for component_id in payload_info.get("components", [])]
+        with chart_left:
+            st.plotly_chart(formulation_pie(chart_labels, payload_info.get("fractions", [])), use_container_width=True)
+        with chart_right:
+            st.plotly_chart(formulation_bar(chart_labels, payload_info.get("fractions", [])), use_container_width=True)
 
-        ti1, ti2 = st.columns(2)
-        ti1.info(f"**Tensile (mean ± std):** {ts_lo:.3f} – {ts_hi:.3f} MPa")
-        ti2.info(f"**Porosity (mean ± std):** {por_lo:.4f} – {por_hi:.4f}")
-
-        if result["tensile_mean"] < 1.0:
-            st.warning(
-                "Tensile strength < 1 MPa — the tablet may not have sufficient "
-                "mechanical integrity.  Consider increasing compaction pressure "
-                "or reducing high-plasticity excipients.",
-                icon="⚠️",
-            )
-
-    # ── Morphology / PCA ─────────────────────────────────────────────────
-    with tab_morph:
-        p1, p2 = st.columns(2)
-        with p1:
-            st.plotly_chart(
-                psd_figure(result["ce_diameter"], result["particle_size_dist"]),
-                use_container_width=True,
-            )
-            st.plotly_chart(
-                pca_bar(result["PCs_PSD"], "PCA Scores — Particle Size Distribution"),
-                use_container_width=True,
-            )
-        with p2:
-            st.plotly_chart(
-                ar_figure(result["Aspect Ratio"], result["aspect_ratio_dist"]),
-                use_container_width=True,
-            )
-            st.plotly_chart(
-                pca_bar(result["PCs_AR"], "PCA Scores — Aspect Ratio Distribution"),
-                use_container_width=True,
-            )
-        st.caption(
-            "PSD and AR distributions are blend-level predictions derived from the "
-            "mixture model applied to raw material morphological data.  "
-            "PCA scores summarise the distribution shape in the latent space used by "
-            "the porosity and tensile strength models."
-        )
-
-    # ── Formulation composition ──────────────────────────────────────────
-    with tab_form:
-        titles_disp   = st.session_state.get("sr_titles", [])
-        fracs_disp    = st.session_state.get("sr_fracs", [])
-        comp_ids_disp = st.session_state.get("sr_comp_ids", [])
-        if titles_disp and fracs_disp:
-            pie_c, tbl_c = st.columns(2)
-            with pie_c:
-                st.plotly_chart(
-                    formulation_pie(
-                        [component_label(c) for c in comp_ids_disp],
-                        fracs_disp,
-                    ),
-                    use_container_width=True,
-                )
-            with tbl_c:
-                df_form = pd.DataFrame({
-                    "ID":       comp_ids_disp,
-                    "Name":     [component_label(c) for c in comp_ids_disp],
-                    "Fraction": [f"{f:.4f}" for f in fracs_disp],
-                })
-                st.dataframe(df_form, use_container_width=True, hide_index=True)
-
-    # ── Raw data download ─────────────────────────────────────────────────
     with tab_raw:
-        st.json(result)
         st.download_button(
-            "⬇ Download JSON",
-            data=json.dumps(result, indent=2),
+            "Download JSON",
+            data=json.dumps(result, indent=2).encode("utf-8"),
             file_name="single_run_result.json",
             mime="application/json",
         )
+        st.json(result)

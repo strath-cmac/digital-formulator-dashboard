@@ -8,13 +8,15 @@ The dashboard is a **separate microservice** that communicates with the FastAPI 
 
 ## Overview
 
-The Digital Formulator system predicts tablet and blend properties from raw material (excipient) data, and optimises formulations to meet user-defined objectives and constraints.  This dashboard exposes three simulation tools through an interactive browser UI:
+The Digital Formulator system predicts tablet and blend properties from raw material data and optimises formulations to meet user-defined objectives and constraints. This dashboard queries the live FastAPI contract and exposes the full analysis surface through an interactive browser UI:
 
 | Tool | Description |
 |------|-------------|
 | **Single Run** | Simulate granular and tablet properties at a fixed compaction pressure |
 | **Multiple Run** | Generate compressibility and tensile-strength profiles across a CP range using Kawakita and Duckworth empirical models |
-| **Digital Formulator** | Run NSGA-II (multi-objective) or mixed-variable GA (single-objective) to find Pareto-optimal formulations |
+| **Digital Formulator** | Run NSGA-II (multi-objective) or mixed-variable GA (single-objective) to search for an optimised formulation |
+| **Formulation Comparison** | Compare multiple candidate formulations side by side using the same prediction endpoint |
+| **Sensitivity Analysis** | Sweep one fraction or the compaction pressure to map model response trends |
 
 ---
 
@@ -23,12 +25,12 @@ The Digital Formulator system predicts tablet and blend properties from raw mate
 ```
 ┌──────────────────────────────────┐      ┌────────────────────────────────────┐
 │  Digital Formulator API          │      │  This Dashboard                    │
-│  FastAPI · Port 8000             │◄─────│  Streamlit · Port 8501             │
+│  FastAPI · Port 8080             │◄─────│  Streamlit · Port 8501             │
 │  github.com/strath-cmac/         │ HTTP │  github.com/strath-cmac/           │
 │    digital-formulator            │      │    digital-formulator-dashboard     │
 └──────────────────────────────────┘      └────────────────────────────────────┘
   API and dashboard can run on the same machine or on different machines.
-  The dashboard locates the API via the API_BASE_URL environment variable.
+  The dashboard locates the API via the API_BASE_URL environment variable and can auto-probe common localhost 8080/8000 URLs.
 ```
 
 ---
@@ -116,10 +118,10 @@ docker build -t dm2-dashboard:latest ./digital-formulator-dashboard
 docker-compose up -d
 
 # Dashboard:  http://<machine-ip>:8501
-# API docs:   http://<machine-ip>:8000/docs
+# API docs:   http://<machine-ip>:8080/docs
 ```
 
-The `docker-compose.yml` creates a shared `dm2_net` bridge network so the dashboard reaches the API at `http://dm2_api:8000` (by service name, not `localhost`).
+The `docker-compose.yml` creates a shared `dm2_net` bridge network so the dashboard reaches the API at `http://dm2_api:8080` when the API container uses its default port.
 
 ---
 
@@ -136,8 +138,8 @@ pip install -r requirements.txt
 # 3. Configure API URL
 cp .env.example .env
 # Edit .env — pick the line that matches your setup (see .env.example for all options)
-# e.g. API_BASE_URL=http://localhost:8000        (API on same machine)
-# e.g. API_BASE_URL=http://130.159.77.49:8000    (API on a remote machine)
+# e.g. API_BASE_URL=http://localhost:8080        (API on same machine)
+# e.g. API_BASE_URL=http://130.159.77.49:8080    (API on a remote machine)
 
 # 4. Run
 streamlit run app.py
@@ -152,25 +154,25 @@ The dashboard is configured entirely through environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `API_BASE_URL` | `http://localhost:8000` | Base URL of the Digital Formulator FastAPI backend |
+| `API_BASE_URL` | `http://localhost:8080` | Base URL of the Digital Formulator FastAPI backend |
 
 The dashboard supports three deployment topologies:
 
 | Scenario | `API_BASE_URL` value |
 |----------|---------------------|
-| Same machine, no Docker | `http://localhost:8000` |
-| Same machine, Docker Compose (service name) | `http://dm2_api:8000` |
-| Same machine, Docker Desktop (host gateway) | `http://host.docker.internal:8000` |
-| **Different machine / remote server** | `http://130.159.77.49:8000` |
+| Same machine, no Docker | `http://localhost:8080` |
+| Same machine, Docker Compose (service name) | `http://dm2_api:8080` |
+| Same machine, Docker Desktop (host gateway) | `http://host.docker.internal:8080` |
+| **Different machine / remote server** | `http://130.159.77.49:8080` |
 
 Set `API_BASE_URL` in a `.env` file (copy `.env.example`) or pass it directly at container start:
 
 ```bash
 # Remote API on a different machine
-docker run -p 8501:8501 -e API_BASE_URL=http://130.159.77.49:8000 dm2-dashboard:latest
+docker run -p 8501:8501 -e API_BASE_URL=http://130.159.77.49:8080 dm2-dashboard:latest
 
 # Local API on the same machine (Docker Desktop)
-docker run -p 8501:8501 -e API_BASE_URL=http://host.docker.internal:8000 dm2-dashboard:latest
+docker run -p 8501:8501 -e API_BASE_URL=http://host.docker.internal:8080 dm2-dashboard:latest
 ```
 
 ---

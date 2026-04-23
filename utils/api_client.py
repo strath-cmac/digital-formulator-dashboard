@@ -1,227 +1,256 @@
-"""
-Centralised HTTP client for the Digital Formulator FastAPI backend.
-
-All network calls go through this module so the rest of the dashboard
-never imports `requests` directly.  The API base URL is resolved once
-at import time from the environment variable ``API_BASE_URL``
-(default: http://localhost:8080).
-"""
+"""Centralised HTTP client and API discovery helpers for the dashboard."""
 
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from functools import lru_cache
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
 
-BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
-
-# Timeout constants (seconds)
 TIMEOUT_SHORT: int = 30
 TIMEOUT_MEDIUM: int = 120
-TIMEOUT_LONG: int = 900   # optimiser can run for many minutes
+TIMEOUT_LONG: int = 900
+OPENAPI_TIMEOUT: int = 8
 
-# ── Fallback options ────────────────────────────────────────────────────
-# Used when /digital_formulator/options returns 5xx.
-# Component lists are intentionally empty — the dashboard will show an
-# error banner if the API is unreachable rather than misleading stale data.
-_FALLBACK_OPTIONS: Dict = {
-    "available_apis":        [],
-    "available_excipients":  [],
-    "available_objectives":  [
-        "maximise_tensile",
-        "minimise_tablet_weight",
-        "maximise_porosity",
-        "maximise_ffc",
-        "minimise_eaoif",
-    ],
-    "available_constraints": [
-        "eaoif_max",
-        "ffc_min",
-        "porosity_min",
-        "porosity_minus_std_min",
-        "tensile_mean_min",
-        "tensile_strength_min",
-    ],
+_SESSION = requests.Session()
+_RESOLVED_BASE_URL: Optional[str] = None
+_LAST_OPTIONS: Dict[str, Any] = {}
+
+_DEFAULT_FALLBACK_OPTIONS: Dict[str, Any] = {
+    "available_components": [],
+    "available_apis": [],
+    "available_excipients": [],
+    "available_objectives": [],
+    "available_constraints": [],
     "component_names": {},
-    "current_defaults": {
-        "objectives":             ["maximise_tensile", "minimise_tablet_weight"],
-        "constraints":            [
-            {"name": "porosity_minus_std_min", "threshold": 0.14},
-            {"name": "ffc_min",                "threshold": 4.0},
-            {"name": "tensile_strength_min",   "threshold": 2.0},
-            {"name": "eaoif_max",              "threshold": 41.0},
-        ],
-        "excipient_options":      [],
-        "disintegrant_id":        "cc1",
-        "disintegrant_fraction":  0.08,
-        "lubricant_id":           "ms1",
-        "lubricant_fraction":     0.01,
-        "cp_bounds":              [70.0, 250.0],
-        "filler1_fraction_lower": 0.0,
-        "pop_size":               20,
-        "n_iters":                50,
-        "n_threads":              8,
-    },
+    "current_defaults": {},
+    "options_degraded": True,
 }
 
-# ── Known component name lookup ──────────────────────────────────────────
-# Built from the model project's COMPONENT_NAMES dict (commented reference)
-# and extended with known API identifiers.  Falls back to the raw ID for
-# any component not listed here (e.g. new materials added to the database).
-_COMPONENT_LABELS: Dict[str, str] = {
-    # ── Disintegrant ─────────────────────────────────────────────────────
-    "cc1":  "Croscarmellose sodium",
-    # ── Lubricant ─────────────────────────────────────────────────────────
-    "ms1":  "Magnesium stearate",
-    # ── Lactose variants ─────────────────────────────────────────────────
-    "la1":  "Lactose monohydrate",
-    "la3":  "Lactose monohydrate (LH300)",
-    "la4":  "Lactose monohydrate (SV003)",
-    "la5":  "Lactose monohydrate",
-    "la6":  "Lactose monohydrate (ST14SD)",
-    "la8":  "Lactose monohydrate (Pharmatose 450M)",
-    "la9":  "Lactose monohydrate (ST30SD)",
-    "la10": "Lactose monohydrate (Tablettose 100)",
-    # ── Mannitol ─────────────────────────────────────────────────────────
-    "ma1":  "Mannitol (Pearlitol 200SD)",
-    "ma2":  "Mannitol",
-    # ── Microcrystalline cellulose ────────────────────────────────────────
-    "mc1":  "MCC (Avicel PH102-like)",
-    "mc2":  "MCC",
-    "mc4":  "MCC",
-    "mc5":  "MCC (Avicel PH101)",
-    "mc6":  "MCC (Avicel PH102)",
-    "mc7":  "MCC (Avicel PH200)",
-    # ── HPMC ─────────────────────────────────────────────────────────────
-    "sh14": "HPMC (Pharmacoat 603)",
-    "sh15": "HPMC (Methocel K4M)",
-    "sh16": "HPMC",
-    # ── Other excipients ─────────────────────────────────────────────────
-    "dc1":  "Di-calcium phosphate",
-    "gr1":  "Granulated excipient",
-    "gr2":  "Granulated excipient",
-    "sp1":  "Starch",
-    "sp2":  "Starch",
-    "sp3":  "Starch",
-    "sp4":  "Starch",
-    "sp5":  "Starch",
-    "ms2":  "Magnesium stearate alt.",
-    "ms4":  "Magnesium stearate alt.",
-    "ms5":  "Magnesium stearate alt.",
-    # ── Active Pharmaceutical Ingredients ────────────────────────────────
-    "as1":  "API — as1",
-    "as2":  "API — as2",
-    "dm1":  "Dexamethasone [API]",
-    "ib1":  "Ibuprofen — ib1 [API]",
-    "ib2":  "Ibuprofen [API]",
-    "ib6":  "Ibuprofen — ib6 [API]",
-    "rp1":  "API — rp1 [API]",
-    "sh1":  "API — sh1 [API]",
-    "sh2":  "API — sh2 [API]",
-    "caf":  "Caffeine [API]",
-}
 
-# IDs considered active pharmaceutical ingredients (for UI labelling)
-_API_IDS: frozenset = frozenset({
-    "as1", "as2", "dm1", "ib1", "ib2", "ib6", "rp1", "sh1", "sh2", "caf",
-})
+def _normalise_url(url: str) -> str:
+    return url.strip().rstrip("/")
 
 
-def component_label(cid: str) -> str:
-    """Return a human-readable display label for a component ID."""
-    return _COMPONENT_LABELS.get(cid, cid)
+def _dedupe(values: Iterable[str]) -> List[str]:
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for value in values:
+        clean = _normalise_url(value)
+        if clean and clean not in seen:
+            ordered.append(clean)
+            seen.add(clean)
+    return ordered
+
+
+def _candidate_base_urls() -> List[str]:
+    env_url = os.getenv("API_BASE_URL", "")
+    extra = os.getenv("API_BASE_URL_CANDIDATES", "")
+    extras = [item for item in extra.split(",") if item.strip()]
+    return _dedupe(
+        [
+            env_url,
+            *extras,
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://host.docker.internal:8080",
+            "http://host.docker.internal:8000",
+        ]
+    )
+
+
+def _coerce_string_list(value: Any) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
+def _probe_openapi(base_url: str) -> Dict[str, Any]:
+    response = _SESSION.get(f"{base_url}/openapi.json", timeout=OPENAPI_TIMEOUT)
+    response.raise_for_status()
+    return response.json()
+
+
+def _resolve_base_url(force_refresh: bool = False) -> str:
+    global _RESOLVED_BASE_URL
+
+    if _RESOLVED_BASE_URL and not force_refresh:
+        return _RESOLVED_BASE_URL
+
+    errors: List[str] = []
+    for candidate in _candidate_base_urls():
+        try:
+            _probe_openapi(candidate)
+            _RESOLVED_BASE_URL = candidate
+            return candidate
+        except requests.RequestException as exc:
+            errors.append(f"{candidate} ({exc.__class__.__name__})")
+
+    preferred = _normalise_url(os.getenv("API_BASE_URL", "http://localhost:8080"))
+    if preferred:
+        _RESOLVED_BASE_URL = preferred
+    if errors:
+        raise requests.ConnectionError(
+            "Unable to discover a reachable backend. Tried: " + ", ".join(errors)
+        )
+    raise requests.ConnectionError("Unable to discover a reachable backend.")
+
+
+def get_base_url(force_refresh: bool = False) -> str:
+    return _resolve_base_url(force_refresh=force_refresh)
+
+
+@lru_cache(maxsize=8)
+def _cached_openapi(base_url: str) -> Dict[str, Any]:
+    return _probe_openapi(base_url)
+
+
+def get_openapi(force_refresh: bool = False) -> Dict[str, Any]:
+    base_url = get_base_url(force_refresh=force_refresh)
+    if force_refresh:
+        _cached_openapi.cache_clear()
+    return _cached_openapi(base_url)
+
+
+def get_api_contract(force_refresh: bool = False) -> Dict[str, Any]:
+    schema = get_openapi(force_refresh=force_refresh)
+    info = schema.get("info", {})
+    paths = schema.get("paths", {})
+    return {
+        "base_url": get_base_url(force_refresh=force_refresh),
+        "title": info.get("title", "Digital Formulator API"),
+        "version": info.get("version", "unknown"),
+        "path_map": paths,
+        "paths": sorted(paths.keys()),
+    }
+
+
+def supports_endpoint(endpoint: str) -> bool:
+    try:
+        return endpoint in get_api_contract().get("path_map", {})
+    except Exception:
+        return False
+
+
+def _request(method: str, endpoint: str, timeout: int, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    base_url = get_base_url()
+    response = _SESSION.request(
+        method=method,
+        url=f"{base_url}{endpoint}",
+        json=payload,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    if not response.content:
+        return {}
+    return response.json()
+
+
+def _get(endpoint: str, timeout: int = TIMEOUT_SHORT) -> Dict[str, Any]:
+    return _request("GET", endpoint, timeout=timeout)
+
+
+def _post(endpoint: str, payload: Dict[str, Any], timeout: int = TIMEOUT_SHORT) -> Dict[str, Any]:
+    return _request("POST", endpoint, timeout=timeout, payload=payload)
+
+
+def _normalise_options(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    global _LAST_OPTIONS
+
+    data = raw or {}
+    component_names = data.get("component_names")
+    if not isinstance(component_names, dict):
+        component_names = {}
+
+    available_components = _coerce_string_list(data.get("available_components"))
+    if not available_components:
+        available_components = _coerce_string_list(data.get("available_excipients"))
+
+    available_apis = _coerce_string_list(data.get("available_apis"))
+    available_excipients = _coerce_string_list(data.get("available_excipients"))
+
+    if available_components and available_excipients and not available_apis:
+        available_excipients = available_components
+    elif available_components and not available_excipients:
+        available_excipients = available_components
+
+    current_defaults = data.get("current_defaults")
+    if not isinstance(current_defaults, dict):
+        current_defaults = {}
+
+    normalised = {
+        "available_components": available_components,
+        "available_apis": [cid for cid in available_apis if cid in available_components] if available_components else available_apis,
+        "available_excipients": available_excipients,
+        "available_objectives": _coerce_string_list(data.get("available_objectives")),
+        "available_constraints": _coerce_string_list(data.get("available_constraints")),
+        "component_names": {str(key): str(value) for key, value in component_names.items()},
+        "current_defaults": current_defaults,
+        "options_degraded": bool(data.get("options_degraded", False)),
+        "source_base_url": get_base_url(),
+    }
+    _LAST_OPTIONS = normalised
+    return normalised
+
+
+def health_check(force_refresh: bool = False) -> Tuple[bool, str]:
+    try:
+        contract = get_api_contract(force_refresh=force_refresh)
+    except Exception as exc:
+        return False, str(exc)
+
+    path_count = len(contract.get("paths", []))
+    return True, f"Connected to {contract['base_url']} with {path_count} API paths"
+
+
+def get_options(force_refresh: bool = False) -> Dict[str, Any]:
+    if force_refresh:
+        _cached_openapi.cache_clear()
+
+    try:
+        raw = _get("/digital_formulator/options")
+        return _normalise_options(raw)
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code >= 500:
+            fallback = dict(_DEFAULT_FALLBACK_OPTIONS)
+            fallback["source_base_url"] = get_base_url()
+            return _normalise_options(fallback)
+        raise
+    except Exception:
+        fallback = dict(_DEFAULT_FALLBACK_OPTIONS)
+        try:
+            fallback["source_base_url"] = get_base_url()
+        except Exception:
+            pass
+        return _normalise_options(fallback)
+
+
+def component_label(cid: str, options: Optional[Dict[str, Any]] = None) -> str:
+    names = (options or _LAST_OPTIONS).get("component_names", {})
+    return names.get(cid, cid)
 
 
 def component_short_name(cid: str) -> str:
-    """Return the short identifier used as the API `title` field (always the raw ID)."""
     return cid
 
 
-def is_api(cid: str) -> bool:
-    """Return True if the component ID is a known active pharmaceutical ingredient."""
-    label = _COMPONENT_LABELS.get(cid, "")
-    return cid in _API_IDS or "[API]" in label
+def is_api(cid: str, options: Optional[Dict[str, Any]] = None) -> bool:
+    return cid in set((options or _LAST_OPTIONS).get("available_apis", []))
 
 
-# ── Internal helpers ────────────────────────────────────────────────────
-
-def _get(endpoint: str, timeout: int = TIMEOUT_SHORT) -> Dict:
-    r = requests.get(f"{BASE_URL}{endpoint}", timeout=timeout)
-    r.raise_for_status()
-    return r.json()
-
-
-def _post(endpoint: str, payload: Dict, timeout: int = TIMEOUT_SHORT) -> Dict:
-    r = requests.post(f"{BASE_URL}{endpoint}", json=payload, timeout=timeout)
-    r.raise_for_status()
-    return r.json()
-
-
-# ── Public API ──────────────────────────────────────────────────────────
-
-def health_check() -> Tuple[bool, str]:
-    """Verify the API is reachable by fetching /openapi.json (always available).
-
-    /digital_formulator/options is NOT used here because it can return 5xx
-    while all simulation endpoints are working fine.
-    """
-    url = f"{BASE_URL}/openapi.json"
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        return True, "Connected"
-    except requests.exceptions.ConnectionError:
-        return False, (
-            f"Connection refused — cannot reach {BASE_URL}\n"
-            "If the API is running on the **same machine** as Docker, use "
-            "`--network=host` (Linux) or `http://host.docker.internal:8000` (Docker Desktop)."
-        )
-    except requests.exceptions.Timeout:
-        return False, f"Request timed out after 10 s — {url}"
-    except requests.exceptions.HTTPError as e:
-        return False, f"HTTP {e.response.status_code} from {url} — {e}"
-    except Exception as e:
-        return False, f"{url} — {e}"
-
-
-def get_options() -> Dict:
-    """
-    GET /digital_formulator/options
-
-    The backend returns all materials (APIs + excipients) together under
-    ``available_excipients``.  This function post-processes the response to
-    split them into ``available_apis`` and ``available_excipients`` using the
-    local ``is_api()`` lookup, so the rest of the dashboard can distinguish
-    between the two categories.
-
-    Falls back to minimal built-in defaults on any error so the
-    dashboard remains usable when the API is degraded.
-    """
-    try:
-        raw = _get("/digital_formulator/options")
-    except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code >= 500:
-            return _FALLBACK_OPTIONS
-        raise
-    except Exception:
-        return _FALLBACK_OPTIONS
-
-    # Backend merges all materials into available_excipients.
-    # Split them here so the UI can present APIs and excipients separately.
-    all_comps: List[str] = raw.get("available_excipients", [])
-    if not raw.get("available_apis"):
-        # Backend did not separate them — split by local knowledge.
-        raw["available_apis"]      = [c for c in all_comps if is_api(c)]
-        raw["available_excipients"] = [c for c in all_comps if not is_api(c)]
-
-    return raw
+def get_component_choices(options: Optional[Dict[str, Any]] = None) -> List[str]:
+    source = options or _LAST_OPTIONS
+    return source.get("available_components") or source.get("available_excipients", [])
 
 
 def single_run(
@@ -377,3 +406,6 @@ def ffc_v4_class(
         return res.get("ffc_class")
     except Exception:
         return None
+
+
+_FALLBACK_OPTIONS = _DEFAULT_FALLBACK_OPTIONS

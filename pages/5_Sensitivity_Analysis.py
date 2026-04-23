@@ -1,466 +1,276 @@
-"""
-Sensitivity Analysis Page
-
-Quantify how model outputs respond to systematic changes in a single
-formulation parameter while holding all others fixed.
-
-Two sweep modes
----------------
-Vary Fraction
-    Sweep the weight fraction of one chosen excipient across a range.
-    All other components are rescaled proportionally so fractions always
-    sum to 1.
-
-Vary Compaction Pressure
-    Sweep CP from a minimum to a maximum value with the formulation fixed.
-    Unlike the Multiple Run page (which uses empirical Kawakita/Duckworth
-    fits), this mode calls the ML model directly at each CP point and
-    therefore also reports granular properties (FFC, density, etc.).
-
-Output tabs
------------
-💧 Flowability  — FFC, Carr's Index, Hausner Ratio, EAOIF
-💊 Tablet       — porosity and tensile strength (with ±std bands)
-⚖️  Density      — true, bulk, and tapped density
-📋 Table        — raw numeric data table + CSV download
-"""
-
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-from utils.api_client import (
-    get_options,
-    single_run,
-    component_label,
-    component_short_name,
+from utils.api_client import single_run
+from utils.dashboard import (
+    build_default_formulation,
+    component_select_maps,
+    derived_metrics,
+    format_component_option,
+    normalise_formulation_frame,
+    refresh_api_state,
+    render_empty_state,
+    render_page_header,
 )
-from utils.plotting import (
-    multi_line_figure,
-    sensitivity_band_figure,
-    formulation_pie,
+from utils.plotting import formulation_pie, multi_line_figure, sensitivity_band_figure
+
+
+_BLUE = "#0b6e69"
+_ORANGE = "#c96b32"
+_GREEN = "#4c7c59"
+_PURPLE = "#7b5ea7"
+
+
+api_state = refresh_api_state()
+if not api_state["ok"]:
+    st.error(api_state["msg"])
+    st.stop()
+
+contract = api_state["contract"]
+options = api_state["options"]
+
+if "/single_run" not in contract.get("path_map", {}):
+    st.error("The connected backend does not publish the /single_run endpoint used for sweep analysis.")
+    st.stop()
+
+display_options, label_to_id = component_select_maps(options)
+if not display_options:
+    st.error("No material components were returned by the API.")
+    st.stop()
+
+if "sa_form_df" not in st.session_state:
+    st.session_state["sa_form_df"] = build_default_formulation(options)
+
+render_page_header(
+    "Sensitivity analysis",
+    "Sweep one formulation fraction or the compaction pressure and inspect how flowability, density, porosity, and tensile response evolve across the design space.",
+    badge="/single_run",
 )
 
-# Colour constants (mirrored from plotting module)
-_BLUE   = "#3b82f6"
-_ORANGE = "#f97316"
-_GREEN  = "#22c55e"
-_PURPLE = "#a855f7"
-_TEAL   = "#14b8a6"
-_YELLOW = "#eab308"
+config_col, result_col = st.columns([1.1, 1.5], gap="large")
+
+with config_col:
+    with st.container(border=True):
+        st.caption("Sweep mode")
+        mode = st.radio("Mode", options=["Fraction sweep", "Pressure sweep"], horizontal=True, label_visibility="collapsed")
+
+    with st.container(border=True):
+        header_left, header_right = st.columns([2, 1])
+        with header_left:
+            st.caption("Base formulation")
+        with header_right:
+            if st.button("Reset defaults", use_container_width=True):
+                st.session_state["sa_form_df"] = build_default_formulation(options)
+                st.session_state.pop("sa_result_df", None)
+                st.rerun()
+
+        edited_df = st.data_editor(
+            st.session_state["sa_form_df"],
+            key="sa_editor",
+            use_container_width=True,
+            num_rows="dynamic",
+            hide_index=True,
+            column_config={
+                "Component": st.column_config.SelectboxColumn("Component", options=display_options, required=True, width="large"),
+                "Fraction": st.column_config.NumberColumn("Fraction (w/w)", min_value=0.0001, max_value=1.0, step=0.005, format="%.4f", width="small"),
+            },
+        )
+        st.session_state["sa_form_df"] = edited_df
+
+    valid_df = edited_df.dropna(subset=["Component", "Fraction"])
+    component_labels = valid_df["Component"].tolist()
+
+    with st.container(border=True):
+        st.caption("Sweep settings")
+        x_values: list[float] = []
+        x_label = "Parameter"
+        fixed_cp = 200.0
+        varied_component_label = None
+
+        if mode == "Fraction sweep" and component_labels:
+            varied_component_label = st.selectbox("Component to vary", options=component_labels)
+            min_fraction = st.slider("Minimum fraction", min_value=0.01, max_value=0.80, value=0.05, step=0.01)
+            max_fraction = st.slider("Maximum fraction", min_value=float(round(min_fraction + 0.05, 2)), max_value=0.95, value=max(0.40, float(round(min_fraction + 0.15, 2))), step=0.01)
+            n_points = st.slider("Number of evaluation points", min_value=5, max_value=25, value=12, step=1)
+            fixed_cp = st.slider("Fixed compaction pressure", min_value=50.0, max_value=450.0, value=200.0, step=5.0)
+            x_values = np.linspace(min_fraction, max_fraction, n_points).tolist()
+            x_label = f"{varied_component_label} fraction"
+        elif mode == "Pressure sweep":
+            cp_min, cp_max = st.slider("Compaction-pressure range", min_value=30.0, max_value=450.0, value=(70.0, 300.0), step=5.0)
+            n_points = st.slider("Number of evaluation points", min_value=5, max_value=25, value=12, step=1)
+            x_values = np.linspace(cp_min, cp_max, n_points).tolist()
+            x_label = "Compaction pressure (MPa)"
+
+    run_disabled = len(valid_df) == 0 or len(x_values) < 2
+    run_clicked = st.button("Run sensitivity study", type="primary", use_container_width=True, disabled=run_disabled)
 
 
-st.markdown("""
-<div class='page-header'>
-  <div class='ph-title'>\U0001f4d0 Sensitivity Analysis</div>
-  <div class='ph-sub'>Sweep one parameter while holding all others fixed to quantify model sensitivity and map design-space boundaries</div>
-</div>""", unsafe_allow_html=True)
+def _run_single(components: list[str], fractions: list[float], cp: float) -> dict:
+    return single_run(
+        titles=components,
+        components=components,
+        fractions=fractions,
+        cp=cp,
+    )
 
-if "api_options" not in st.session_state:
+
+if run_clicked:
     try:
-        st.session_state["api_options"] = get_options()
-    except Exception as e:
-        st.error(f"Cannot reach API: {e}")
-        st.stop()
+        base_payload = normalise_formulation_frame(edited_df, label_to_id)
+        base_components = base_payload.components
+        base_fraction_map = dict(zip(base_payload.components, base_payload.fractions))
+        rows: list[dict] = []
+        progress = st.progress(0, text="Running sensitivity study")
 
-opts           = st.session_state["api_options"]
-all_excipients = opts.get("available_excipients", [])
-all_apis       = opts.get("available_apis", [])
-all_components = all_apis + all_excipients   # APIs listed first
+        if mode == "Fraction sweep" and varied_component_label is not None:
+            varied_component = label_to_id[varied_component_label]
+            other_components = [component for component in base_components if component != varied_component]
+            base_other_total = sum(base_fraction_map[component] for component in other_components)
 
-if not all_components:
-    st.error("No components returned by the API. Is the backend running?")
-    st.stop()
+            for index, x_value in enumerate(x_values):
+                fraction_map = {varied_component: x_value}
+                if other_components:
+                    if base_other_total > 0:
+                        scale = (1.0 - x_value) / base_other_total
+                        for component in other_components:
+                            fraction_map[component] = max(base_fraction_map[component] * scale, 1e-6)
+                    else:
+                        equal_share = (1.0 - x_value) / len(other_components)
+                        for component in other_components:
+                            fraction_map[component] = equal_share
 
-# ── Configuration ────────────────────────────────────────────────────────
-cfg_col, res_col = st.columns([2, 3], gap="large")
-
-with cfg_col:
-    with st.container(border=True):
-        st.caption("Sensitivity Mode")
-        mode: str = st.radio(
-            "Sensitivity Mode",
-            options=["Vary Fraction", "Vary Compaction Pressure"],
-            index=0,
-            label_visibility="collapsed",
-            help=(
-                "**Vary Fraction** — sweep the weight fraction of one chosen "
-                "excipient; all others are rescaled proportionally.  \n\n"
-                "**Vary Compaction Pressure** — sweep CP across a range with "
-                "a fixed formulation; calls the ML model directly at each point."
-            ),
-        )
-
-    with st.container(border=True):
-        st.caption("Base Formulation")
-        _DEFAULTS = ["mc5", "la9", "cc1", "ms1"]
-        safe_defs  = [d for d in _DEFAULTS if d in all_components]
-        selected: list[str] = st.multiselect(
-            "Components",
-            options=all_components,
-            default=safe_defs if safe_defs else all_components[:3],
-            format_func=component_label,
-            key="sa_sel",
-            label_visibility="collapsed",
-            placeholder="Add components…",
-        )
-        fracs: dict[str, float] = {}
-        if selected:
-            eq_frac = round(1.0 / len(selected), 4)
-            for comp in selected:
-                fracs[comp] = st.number_input(
-                    component_label(comp),
-                    min_value=0.001,
-                    max_value=1.0,
-                    value=eq_frac,
-                    step=0.005,
-                    format="%.4f",
-                    key=f"sa_frac_{comp}",
+                run_components = list(fraction_map.keys())
+                run_fractions = list(fraction_map.values())
+                total = sum(run_fractions)
+                run_fractions = [fraction / total for fraction in run_fractions]
+                response = _run_single(run_components, run_fractions, fixed_cp)
+                metrics = derived_metrics(response)
+                rows.append(
+                    {
+                        "x": x_value,
+                        "true_density": response["true_density"],
+                        "bulk_density": response["bulk_density"],
+                        "tapped_density": response["tapped_density"],
+                        "ffc": response["ffc"],
+                        "eaoif": response["effective_angle_of_internal_friction"],
+                        "carrs_index": metrics["carrs_index"],
+                        "hausner_ratio": metrics["hausner_ratio"],
+                        "porosity_mean": response["porosity_mean"],
+                        "porosity_std": response["porosity_std"],
+                        "tensile_mean": response["tensile_mean"],
+                        "tensile_std": response["tensile_std"],
+                    }
                 )
-            total_f = sum(fracs.values())
-            if abs(total_f - 1.0) < 0.005:
-                st.success(f"Sum: {total_f:.4f} ✓", icon="✅")
-            else:
-                st.warning(f"Sum: {total_f:.4f} → will be normalised", icon="⚠️")
-
-    # ── Mode-specific controls ────────────────────────────────────────
-    x_label  = ""
-    x_range: list[float] = []
-    vary_comp: str | None = None
-    cp_fixed: float = 200.0
-
-    if mode == "Vary Fraction" and selected:
-        with st.container(border=True):
-            st.caption("Fraction Sweep")
-            vary_comp = st.selectbox(
-                "Component to vary",
-                options=selected,
-                format_func=component_label,
-                key="sa_vary_comp",
-            )
-            frac_min = st.slider("Min fraction", 0.01, 0.80, 0.05, 0.01, key="sa_fmin")
-            frac_max = st.slider(
-                "Max fraction",
-                min_value=float(round(frac_min + 0.05, 2)),
-                max_value=0.95,
-                value=min(0.60, max(float(round(frac_min + 0.10, 2)), 0.50)),
-                step=0.01,
-                key="sa_fmax",
-            )
-            n_pts    = st.slider("Number of evaluation points", 5, 25, 12, key="sa_npts")
-            cp_fixed = st.slider("Fixed CP (MPa)", 50.0, 450.0, 200.0, 5.0, key="sa_cp_fixed")
-            x_label  = f"{component_label(vary_comp)} — fraction"
-            x_range  = np.linspace(frac_min, frac_max, n_pts).tolist()
-
-    elif mode == "Vary Compaction Pressure" and selected:
-        with st.container(border=True):
-            st.caption("CP Sweep")
-            cp_min = st.slider("Min CP (MPa)", 30.0, 300.0, 70.0,  5.0, key="sa_cpmin")
-            cp_max = st.slider("Max CP (MPa)", float(round(cp_min + 20.0, 0)), 450.0, 300.0, 5.0, key="sa_cpmax")
-            n_pts  = st.slider("Number of evaluation points", 5, 25, 12, key="sa_npts_cp")
-            x_label = "Compaction Pressure (MPa)"
-            x_range = np.linspace(cp_min, cp_max, n_pts).tolist()
-
-    can_run = len(selected) >= 1 and len(x_range) >= 2
-    run_btn = st.button(
-        "▶  Run Sensitivity Analysis",
-        type="primary",
-        use_container_width=True,
-        disabled=not can_run,
-    )
-
-# ── Guard: not enough inputs ──────────────────────────────────────────────
-if not can_run:
-    with res_col:
-        with st.container(border=True):
-            st.markdown('<div style="text-align:center;padding:3rem 0;opacity:0.4"><div style="font-size:3rem">📐</div><div style="font-size:1.1rem;margin-top:.5rem">Configure the sweep settings and click <strong>▶ Run Sensitivity Analysis</strong></div></div>', unsafe_allow_html=True)
-    st.stop()
-
-# ── Helper: build a single result row ────────────────────────────────────
-def _result_row(res: dict, x_val: float) -> dict:
-    bd = res["bulk_density"]
-    td = res["tapped_density"]
-    return {
-        "x":             x_val,
-        "true_density":  res["true_density"],
-        "bulk_density":  bd,
-        "tapped_density": td,
-        "carrs_index":   (td - bd) / td * 100 if td else 0.0,
-        "hausner_ratio": td / bd if bd else 0.0,
-        "ffc":           res["ffc"],
-        "eaoif":         res["effective_angle_of_internal_friction"],
-        "porosity_mean": res["porosity_mean"],
-        "porosity_std":  res["porosity_std"],
-        "tensile_mean":  res["tensile_mean"],
-        "tensile_std":   res["tensile_std"],
-    }
-
-
-# ── Run analysis ──────────────────────────────────────────────────────────
-if run_btn:
-    rows_list: list[dict] = []
-    errors:    list[str]  = []
-
-    prog = st.progress(0, text="Running analysis…")
-
-    if mode == "Vary Fraction" and vary_comp and len(selected) >= 1:
-        # Other components (fixed in relative ratio)
-        other_comps = [c for c in selected if c != vary_comp]
-        other_base  = sum(fracs.get(c, 0.0) for c in other_comps)
-
-        for k, frac_x in enumerate(x_range):
-            new_fracs: dict[str, float] = {vary_comp: frac_x}
-            if other_comps:
-                if other_base > 0:
-                    scale = (1.0 - frac_x) / other_base
-                    for c in other_comps:
-                        new_fracs[c] = max(fracs.get(c, 0.0) * scale, 1e-6)
-                else:
-                    eq = (1.0 - frac_x) / len(other_comps)
-                    for c in other_comps:
-                        new_fracs[c] = eq
-
-            comps_list  = list(new_fracs.keys())
-            fracs_list  = list(new_fracs.values())
-            frac_total  = sum(fracs_list)
-            fracs_list  = [f / frac_total for f in fracs_list]
-            titles_list = [component_short_name(c) for c in comps_list]
-
-            try:
-                res = single_run(
-                    titles=titles_list,
-                    components=comps_list,
-                    fractions=fracs_list,
-                    cp=cp_fixed,
+                progress.progress((index + 1) / len(x_values), text=f"Computed {index + 1} of {len(x_values)} points")
+        else:
+            for index, x_value in enumerate(x_values):
+                response = _run_single(base_components, base_payload.fractions, float(x_value))
+                metrics = derived_metrics(response)
+                rows.append(
+                    {
+                        "x": x_value,
+                        "true_density": response["true_density"],
+                        "bulk_density": response["bulk_density"],
+                        "tapped_density": response["tapped_density"],
+                        "ffc": response["ffc"],
+                        "eaoif": response["effective_angle_of_internal_friction"],
+                        "carrs_index": metrics["carrs_index"],
+                        "hausner_ratio": metrics["hausner_ratio"],
+                        "porosity_mean": response["porosity_mean"],
+                        "porosity_std": response["porosity_std"],
+                        "tensile_mean": response["tensile_mean"],
+                        "tensile_std": response["tensile_std"],
+                    }
                 )
-                rows_list.append(_result_row(res, frac_x))
-            except Exception as e:
-                errors.append(f"frac={frac_x:.3f}: {e}")
+                progress.progress((index + 1) / len(x_values), text=f"Computed {index + 1} of {len(x_values)} points")
 
-            prog.progress((k + 1) / len(x_range))
-
-    elif mode == "Vary Compaction Pressure":
-        total_f     = sum(fracs.values())
-        comps_list  = list(fracs.keys())
-        fracs_list  = [v / total_f for v in fracs.values()]
-        titles_list = [component_short_name(c) for c in comps_list]
-
-        for k, cp in enumerate(x_range):
-            try:
-                res = single_run(
-                    titles=titles_list,
-                    components=comps_list,
-                    fractions=fracs_list,
-                    cp=cp,
-                )
-                rows_list.append(_result_row(res, cp))
-            except Exception as e:
-                errors.append(f"CP={cp:.0f}: {e}")
-
-            prog.progress((k + 1) / len(x_range))
-
-    prog.empty()
-
-    for err in errors:
-        st.warning(f"Point skipped — {err}")
-
-    if rows_list:
-        st.session_state["sa_df"]      = pd.DataFrame(rows_list)
+        progress.empty()
+        st.session_state["sa_result_df"] = pd.DataFrame(rows)
         st.session_state["sa_x_label"] = x_label
-        st.session_state["sa_mode"]    = mode
-        st.session_state["sa_fracs"]   = fracs
-        st.session_state["sa_comps"]   = list(fracs.keys())
-        st.session_state["sa_titles"]  = [component_short_name(c) for c in fracs]
-        if mode == "Vary Fraction":
-            st.session_state["sa_cp_fixed_val"] = cp_fixed
-    else:
-        st.error("All simulation points failed. Check the API connection.")
-        st.stop()
+        st.session_state["sa_mode"] = mode
+        st.session_state["sa_components"] = base_components
+        st.session_state["sa_fractions"] = base_payload.fractions
+        st.session_state["sa_fixed_cp"] = fixed_cp
+    except Exception as exc:
+        st.error(f"Sensitivity study failed: {exc}")
 
-# ── Guard: no results yet ─────────────────────────────────────────────────
-df: pd.DataFrame | None = st.session_state.get("sa_df")
-if df is None:
-    with res_col:
-        with st.container(border=True):
-            st.markdown('<div style="text-align:center;padding:3rem 0;opacity:0.4"><div style="font-size:3rem">📐</div><div style="font-size:1.1rem;margin-top:.5rem">Configure the sweep settings and click <strong>▶ Run Sensitivity Analysis</strong></div></div>', unsafe_allow_html=True)
+result_df = st.session_state.get("sa_result_df")
+if result_df is None or result_df.empty:
+    with result_col:
+        render_empty_state("📐", "No sensitivity results yet", "Choose a sweep mode, configure the base formulation, and run the live backend study.")
     st.stop()
 
-x_label_disp: str = st.session_state.get("sa_x_label", "Parameter")
-sa_mode: str      = st.session_state.get("sa_mode", mode)
+with result_col:
+    st.caption(f"Mode: {st.session_state.get('sa_mode', mode)}")
+    if st.session_state.get("sa_mode") == "Fraction sweep":
+        st.caption(f"Fixed compaction pressure: {st.session_state.get('sa_fixed_cp', fixed_cp):.0f} MPa")
 
-# ── Summary banner ────────────────────────────────────────────────────────
-n_pts_done = len(df)
-x_min_val  = df["x"].min()
-x_max_val  = df["x"].max()
+    tabs = st.tabs(["Flowability", "Tablet response", "Density", "Base formulation", "Raw table"])
+    x_axis_label = st.session_state.get("sa_x_label", "Parameter")
 
-if sa_mode == "Vary Fraction":
-    saved_comps  = st.session_state.get("sa_comps", [])
-    saved_titles = st.session_state.get("sa_titles", [])
-    saved_fracs  = st.session_state.get("sa_fracs", {})
-    saved_cp     = st.session_state.get("sa_cp_fixed_val", 200.0)
-    vary_idx = None
-    if vary_comp and vary_comp in saved_comps:
-        vary_idx = saved_comps.index(vary_comp)
-    st.success(
-        f"**{n_pts_done} points** evaluated · "
-        f"fraction of *{x_label_disp.split('—')[0].strip()}* "
-        f"swept from **{x_min_val:.3f}** to **{x_max_val:.3f}** · "
-        f"fixed CP = **{saved_cp:.0f} MPa**"
-    )
-else:
-    st.success(
-        f"**{n_pts_done} points** evaluated · "
-        f"CP swept from **{x_min_val:.0f}** to **{x_max_val:.0f}** MPa"
-    )
-
-st.divider()
-
-# ── Results tabs ──────────────────────────────────────────────────────────
-tab_flow, tab_tablet, tab_density, tab_morph_note, tab_raw = st.tabs(
-    ["💧 Flowability", "💊 Tablet", "⚖️ Density", "ℹ️ Morphology Note", "📋 Table"]
-)
-
-# ── Tab: Flowability ──────────────────────────────────────────────────────
-with tab_flow:
-    st.subheader("Flowability Properties vs Parameter")
-    st.plotly_chart(
-        multi_line_figure(
-            df, "x",
-            [
-                ("ffc",          "FFC (flow function coeff.)",  _BLUE),
-                ("carrs_index",  "Carr's Index (%)",            _ORANGE),
-                ("hausner_ratio","Hausner Ratio",                _GREEN),
-                ("eaoif",        "EAOIF (°)",                   _PURPLE),
-            ],
-            x_label_disp,
-            "Flowability Response",
-            "Value",
-        ),
-        use_container_width=True,
-    )
-
-    with st.expander("ℹ FFC Classification Guide"):
-        st.markdown(
-            """
-| FFC | Class |
-|-----|-------|
-| > 10 | Free-flowing |
-| 4 – 10 | Easy-flowing |
-| 2 – 4 | Cohesive |
-| < 2 | Very cohesive |
-"""
-        )
-
-# ── Tab: Tablet ───────────────────────────────────────────────────────────
-with tab_tablet:
-    st.subheader("Tablet Properties vs Parameter")
-
-    col_por, col_ten = st.columns(2)
-
-    with col_por:
+    with tabs[0]:
         st.plotly_chart(
-            sensitivity_band_figure(
-                df, "x", "porosity_mean", "porosity_std",
-                x_label_disp, "Porosity (–)",
-                "Porosity (mean ± std)",
-                color=_BLUE,
+            multi_line_figure(
+                result_df,
+                "x",
+                [
+                    ("ffc", "FFC", _BLUE),
+                    ("carrs_index", "Carr's index", _ORANGE),
+                    ("hausner_ratio", "Hausner ratio", _GREEN),
+                    ("eaoif", "EAOIF", _PURPLE),
+                ],
+                x_axis_label,
+                "Flowability response",
+                "Value",
             ),
             use_container_width=True,
         )
 
-    with col_ten:
-        st.plotly_chart(
-            sensitivity_band_figure(
-                df, "x", "tensile_mean", "tensile_std",
-                x_label_disp, "Tensile Strength (MPa)",
-                "Tensile Strength (mean ± std)",
-                color=_ORANGE,
-            ),
-            use_container_width=True,
-        )
-
-    st.caption(
-        "Shaded band = mean ± 1 std.  "
-        "Porosity decreases with increasing compaction pressure; "
-        "tensile strength typically peaks at intermediate porosity (Duckworth relationship)."
-    )
-
-# ── Tab: Density ──────────────────────────────────────────────────────────
-with tab_density:
-    st.subheader("Blend Density vs Parameter")
-    st.plotly_chart(
-        multi_line_figure(
-            df, "x",
-            [
-                ("true_density",   "True Density (g/cm³)",   _BLUE),
-                ("bulk_density",   "Bulk Density (g/cm³)",   _ORANGE),
-                ("tapped_density", "Tapped Density (g/cm³)", _GREEN),
-            ],
-            x_label_disp,
-            "Density Response",
-            "Density (g/cm³)",
-        ),
-        use_container_width=True,
-    )
-    st.caption(
-        "True density reflects composition (mixture rule); bulk and tapped density "
-        "are sensitive to particle packing and shape."
-    )
-
-# ── Tab: Morphology note ──────────────────────────────────────────────────
-with tab_morph_note:
-    st.info(
-        "Particle size and aspect-ratio distributions are properties of the **blend "
-        "morphology** and do not change with compaction pressure.  "
-        "For morphology visualisation at a fixed formulation, use the **Single Run** page."
-    )
-    if sa_mode == "Vary Fraction":
-        saved_comps2 = st.session_state.get("sa_comps", [])
-        saved_fracs2 = st.session_state.get("sa_fracs", {})
-        if saved_comps2:
-            total_f2    = sum(saved_fracs2.values())
-            base_fracs2 = [v / total_f2 for v in saved_fracs2.values()]
-            st.subheader("Base Formulation Composition")
+    with tabs[1]:
+        left, right = st.columns(2, gap="large")
+        with left:
             st.plotly_chart(
-                formulation_pie(
-                    [component_label(c) for c in saved_comps2],
-                    base_fracs2,
-                ),
+                sensitivity_band_figure(result_df, "x", "porosity_mean", "porosity_std", x_axis_label, "Porosity", "Porosity response", color=_BLUE),
+                use_container_width=True,
+            )
+        with right:
+            st.plotly_chart(
+                sensitivity_band_figure(result_df, "x", "tensile_mean", "tensile_std", x_axis_label, "Tensile strength (MPa)", "Tensile response", color=_ORANGE),
                 use_container_width=True,
             )
 
-# ── Tab: Raw table ────────────────────────────────────────────────────────
-with tab_raw:
-    st.subheader("Raw Sensitivity Data")
+    with tabs[2]:
+        st.plotly_chart(
+            multi_line_figure(
+                result_df,
+                "x",
+                [
+                    ("true_density", "True density", _BLUE),
+                    ("bulk_density", "Bulk density", _GREEN),
+                    ("tapped_density", "Tapped density", _ORANGE),
+                ],
+                x_axis_label,
+                "Density response",
+                "Density (g/cm³)",
+            ),
+            use_container_width=True,
+        )
 
-    display_cols = {
-        "x":             x_label_disp,
-        "true_density":  "True Density (g/cm³)",
-        "bulk_density":  "Bulk Density (g/cm³)",
-        "tapped_density":"Tapped Density (g/cm³)",
-        "carrs_index":   "Carr's Index (%)",
-        "hausner_ratio": "Hausner Ratio",
-        "ffc":           "FFC",
-        "eaoif":         "EAOIF (°)",
-        "porosity_mean": "Porosity Mean",
-        "porosity_std":  "Porosity Std",
-        "tensile_mean":  "Tensile Mean (MPa)",
-        "tensile_std":   "Tensile Std (MPa)",
-    }
-    df_display = df.rename(columns=display_cols)
+    with tabs[3]:
+        chart_labels = [format_component_option(component_id, options) for component_id in st.session_state.get("sa_components", [])]
+        st.plotly_chart(
+            formulation_pie(chart_labels, st.session_state.get("sa_fractions", [])),
+            use_container_width=True,
+        )
 
-    st.dataframe(
-        df_display.style.format("{:.4f}"),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    csv_data = df_display.to_csv(index=False)
-    st.download_button(
-        "⬇ Download CSV",
-        data=csv_data,
-        file_name="sensitivity_analysis.csv",
-        mime="text/csv",
-    )
+    with tabs[4]:
+        st.dataframe(result_df, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download CSV",
+            data=result_df.to_csv(index=False).encode("utf-8"),
+            file_name="sensitivity_analysis.csv",
+            mime="text/csv",
+        )

@@ -1,9 +1,4 @@
-"""
-Reusable Plotly figure factories for the Digital Formulator dashboard.
-
-All figures share a consistent dark theme (plotly_dark) with transparent
-backgrounds so they render correctly on the Streamlit dark canvas.
-"""
+"""Reusable Plotly figure factories for the Digital Formulator dashboard."""
 
 from __future__ import annotations
 
@@ -14,24 +9,28 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # ── Colour palette ──────────────────────────────────────────────────────
-_BLUE   = "#3b82f6"
-_ORANGE = "#f97316"
-_GREEN  = "#22c55e"
-_PURPLE = "#a855f7"
-_TEAL   = "#14b8a6"
-_YELLOW = "#eab308"
-_PINK   = "#ec4899"
+_BLUE   = "#0b6e69"
+_ORANGE = "#c96b32"
+_GREEN  = "#4c7c59"
+_PURPLE = "#7b5ea7"
+_TEAL   = "#2a9d8f"
+_YELLOW = "#c59d2f"
+_PINK   = "#b24c63"
 
 _PALETTE = [_BLUE, _ORANGE, _GREEN, _PURPLE, _TEAL, _YELLOW, _PINK,
-            "#6366f1", "#0ea5e9", "#84cc16"]
+            "#4f6dcf", "#2f97c1", "#6b9c3a"]
 
 # Shared layout overrides applied to every figure
 _BASE_LAYOUT: dict = dict(
-    template="plotly_dark",
+    template="plotly_white",
     paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(15,23,42,0.6)",
-    font=dict(family="sans-serif", size=13),
+    plot_bgcolor="rgba(255,250,241,0.78)",
+    font=dict(family="IBM Plex Sans, sans-serif", size=13, color="#17313e"),
     margin=dict(l=55, r=20, t=48, b=48),
+    title=dict(font=dict(family="Space Grotesk, sans-serif", size=18, color="#17313e")),
+    xaxis=dict(gridcolor="rgba(23,49,62,0.08)", zerolinecolor="rgba(23,49,62,0.08)"),
+    yaxis=dict(gridcolor="rgba(23,49,62,0.08)", zerolinecolor="rgba(23,49,62,0.08)"),
+    legend=dict(bgcolor="rgba(255,255,255,0.55)", bordercolor="rgba(23,49,62,0.08)", borderwidth=1),
 )
 
 
@@ -269,9 +268,9 @@ def formulation_bar(titles: List[str], fractions: List[float]) -> go.Figure:
 
 # Polar charts use a separate layout (plot_bgcolor has no effect on polar axes)
 _POLAR_LAYOUT: dict = dict(
-    template="plotly_dark",
+    template="plotly_white",
     paper_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="sans-serif", size=13),
+    font=dict(family="IBM Plex Sans, sans-serif", size=13, color="#17313e"),
     margin=dict(l=60, r=60, t=68, b=60),
 )
 
@@ -331,10 +330,10 @@ def radar_chart(
                 visible=True,
                 range=[0, 1],
                 showticklabels=False,
-                gridcolor="rgba(255,255,255,0.12)",
+                gridcolor="rgba(23,49,62,0.10)",
             ),
             angularaxis=dict(direction="clockwise"),
-            bgcolor="rgba(15,23,42,0.6)",
+            bgcolor="rgba(255,250,241,0.78)",
         ),
         title="Normalised Property Comparison  (0 = min across formulations, 1 = max)",
         height=520,

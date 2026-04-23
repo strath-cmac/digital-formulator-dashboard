@@ -1,4 +1,3 @@
-"""Multiple-Run Simulation — compressibility and tensile-strength profiles via Kawakita & Duckworth models."""
 from __future__ import annotations
 
 import json
@@ -6,366 +5,184 @@ import json
 import pandas as pd
 import streamlit as st
 
-from utils.api_client import (
-    get_options,
-    multiple_run,
-    component_label,
-    component_short_name,
-    is_api,
+from utils.api_client import multiple_run
+from utils.dashboard import (
+    build_default_formulation,
+    component_select_maps,
+    derived_metrics,
+    format_component_option,
+    normalise_formulation_frame,
+    refresh_api_state,
+    render_empty_state,
+    render_page_header,
+    summarise_formulation,
 )
-from utils.plotting import (
-    compressibility_figure,
-    tensile_figure,
-    formulation_pie,
-    formulation_bar,
-)
+from utils.plotting import compressibility_figure, formulation_bar, formulation_pie, tensile_figure
 
 
-# ── Load API options once per session ────────────────────────────────────────
-if "api_options" not in st.session_state:
-    try:
-        st.session_state["api_options"] = get_options()
-    except Exception as exc:
-        st.error(f"Cannot reach the Digital Formulator API: {exc}")
-        st.stop()
-
-opts           = st.session_state["api_options"]
-all_excipients = opts.get("available_excipients", [])
-all_apis       = opts.get("available_apis", [])
-all_components = all_apis + all_excipients
-
-if not all_components:
-    st.error(
-        "The API returned no components. "
-        "Check that the backend is running and the material database is accessible."
-    )
+api_state = refresh_api_state()
+if not api_state["ok"]:
+    st.error(api_state["msg"])
     st.stop()
 
-_label_options = [component_label(c) for c in all_components]
-_id_from_label = {component_label(c): c for c in all_components}
+contract = api_state["contract"]
+options = api_state["options"]
 
-# ── Page header ───────────────────────────────────────────────────────────────
-st.markdown("""
-<div class='page-header'>
-  <div class='ph-title'>📈 Multiple-Run Simulation</div>
-  <div class='ph-sub'>Generate a compressibility and tensile-strength profile across a compaction-pressure range
-  using the Kawakita and Duckworth empirical models</div>
-</div>""", unsafe_allow_html=True)
+if "/multiple_run" not in contract.get("path_map", {}):
+    st.error("The connected backend does not publish the /multiple_run endpoint.")
+    st.stop()
 
-# ── Sensible default formulation ──────────────────────────────────────────────
-_DEFAULT_IDS   = ["mc5", "la9", "cc1", "ms1"]
-_DEFAULT_FRACS = [0.71, 0.20, 0.08, 0.01]
+display_options, label_to_id = component_select_maps(options)
+if not display_options:
+    st.error("No material components were returned by the API.")
+    st.stop()
 
+if "mr_form_df" not in st.session_state:
+    st.session_state["mr_form_df"] = build_default_formulation(options)
 
-def _build_default_df() -> pd.DataFrame:
-    pairs = [
-        (c, f) for c, f in zip(_DEFAULT_IDS, _DEFAULT_FRACS)
-        if c in all_components
-    ]
-    if not pairs:
-        n = min(4, len(all_components))
-        pairs = [(all_components[i], round(1.0 / n, 4)) for i in range(n)]
-    if pairs and all_apis and not any(is_api(c) for c, _ in pairs):
-        api_id = all_apis[0]
-        pairs = [(api_id, 0.20)] + [(c, round(f * 0.80, 4)) for c, f in pairs]
-    comps, fracs = zip(*pairs) if pairs else ([], [])
-    return pd.DataFrame({
-        "Component": [component_label(c) for c in comps],
-        "Fraction":  list(fracs),
-    })
+default_cp_bounds = options.get("current_defaults", {}).get("cp_bounds", [70.0, 250.0])
+cp_default_low = float(default_cp_bounds[0]) if len(default_cp_bounds) == 2 else 70.0
+cp_default_high = float(default_cp_bounds[1]) if len(default_cp_bounds) == 2 else 250.0
 
+render_page_header(
+    "Multiple-run profile analysis",
+    "Predict porosity and tensile-strength profiles across a compaction-pressure range and inspect the empirical Kawakita and Duckworth parameters returned by the backend.",
+    badge="/multiple_run",
+)
 
-# ── Layout ────────────────────────────────────────────────────────────────────
-cfg_col, res_col = st.columns([2, 3], gap="large")
+config_col, result_col = st.columns([1.1, 1.5], gap="large")
 
-with cfg_col:
-    # ── Formulation builder ──────────────────────────────────────────────
-    with st.container(border=True):
-        st.caption("Formulation")
-        st.markdown("#### Build your formulation")
-        st.caption(
-            "Typical tablet: API (~20 %) · Filler(s) · "
-            "Disintegrant (~8 %) · Lubricant (~1 %)"
-        )
+with config_col:
+    top_left, top_right = st.columns([2, 1])
+    with top_left:
+        st.caption("Formulation builder")
+    with top_right:
+        if st.button("Reset defaults", use_container_width=True):
+            st.session_state["mr_form_df"] = build_default_formulation(options)
+            st.session_state.pop("mr_result", None)
+            st.rerun()
 
-        if "mr_form_df" not in st.session_state:
-            st.session_state["mr_form_df"] = _build_default_df()
-
-        edited_df = st.data_editor(
-            st.session_state["mr_form_df"],
-            column_config={
-                "Component": st.column_config.SelectboxColumn(
-                    "Component",
-                    options=_label_options,
-                    required=True,
-                    width="large",
-                ),
-                "Fraction": st.column_config.NumberColumn(
-                    "Fraction (w/w)",
-                    min_value=0.001,
-                    max_value=1.0,
-                    step=0.005,
-                    format="%.4f",
-                    width="small",
-                ),
-            },
-            num_rows="dynamic",
-            use_container_width=True,
-            key="mr_form_editor",
-            hide_index=True,
-        )
-        st.session_state["mr_form_df"] = edited_df
-
-        valid_rows = edited_df.dropna(subset=["Component", "Fraction"])
-        total_frac = float(valid_rows["Fraction"].sum()) if not valid_rows.empty else 0.0
-        if abs(total_frac - 1.0) < 0.005:
-            st.success(f"Sum: **{total_frac:.4f}** ✓", icon="✅")
-        else:
-            st.warning(f"Sum: **{total_frac:.4f}** — will be normalised", icon="⚠️")
-
-    # ── CP range ─────────────────────────────────────────────────────────
-    with st.container(border=True):
-        st.caption("Compaction Pressure Range")
-        cp_c1, cp_c2 = st.columns(2)
-        cp_min = cp_c1.number_input(
-            "Min CP (MPa)", min_value=30.0, max_value=400.0, value=70.0, step=5.0
-        )
-        cp_max = cp_c2.number_input(
-            "Max CP (MPa)", min_value=50.0, max_value=450.0, value=250.0, step=5.0
-        )
-        if cp_min >= cp_max:
-            st.error("Min CP must be less than Max CP.")
-        n_runs = st.slider(
-            "Number of simulation points",
-            min_value=3, max_value=20, value=7, step=1,
-            help=(
-                "More points give a smoother empirical fit but take longer. "
-                "7 – 10 points is usually sufficient for reliable Kawakita and Duckworth fitting."
-            ),
-        )
-        st.caption(
-            f"CP range: {cp_min:.0f} – {cp_max:.0f} MPa  ·  {n_runs} evaluations"
-        )
-
-    n_valid = len(valid_rows)
-    run_btn = st.button(
-        "▶  Run Profile",
-        type="primary",
+    edited_df = st.data_editor(
+        st.session_state["mr_form_df"],
+        key="mr_editor",
         use_container_width=True,
-        disabled=(n_valid < 1 or cp_min >= cp_max),
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "Component": st.column_config.SelectboxColumn("Component", options=display_options, required=True, width="large"),
+            "Fraction": st.column_config.NumberColumn("Fraction (w/w)", min_value=0.0001, max_value=1.0, step=0.005, format="%.4f", width="small"),
+        },
     )
+    st.session_state["mr_form_df"] = edited_df
 
-# ── Run ───────────────────────────────────────────────────────────────────────
-if run_btn:
-    vr         = edited_df.dropna(subset=["Component", "Fraction"])
-    comp_ids   = [_id_from_label[lbl] for lbl in vr["Component"].tolist() if lbl in _id_from_label]
-    frac_vals  = [float(v) for v in vr["Fraction"].tolist()]
-    total_frac = sum(frac_vals)
-    norm_fracs = [f / total_frac for f in frac_vals]
-    titles_list = [component_short_name(c) for c in comp_ids]
+    valid_df = edited_df.dropna(subset=["Component", "Fraction"])
+    total_fraction = float(pd.to_numeric(valid_df["Fraction"], errors="coerce").fillna(0).sum())
+    if abs(total_fraction - 1.0) < 0.01:
+        st.success(f"Total fraction = {total_fraction:.4f}")
+    else:
+        st.warning(f"Total fraction = {total_fraction:.4f}. Values will be normalized before submission.")
 
-    with res_col:
-        with st.spinner(
-            f"Running {n_runs} simulations across {cp_min:.0f}–{cp_max:.0f} MPa…"
-        ):
-            try:
-                result = multiple_run(
-                    titles=titles_list,
-                    components=comp_ids,
-                    fractions=norm_fracs,
-                    cp_range=(cp_min, cp_max),
-                    n_runs=n_runs,
-                )
-                st.session_state.update({
-                    "mr_result":   result,
-                    "mr_titles":   titles_list,
-                    "mr_fracs":    norm_fracs,
-                    "mr_comp_ids": comp_ids,
-                    "mr_cp_min":   cp_min,
-                    "mr_cp_max":   cp_max,
-                })
-            except Exception as exc:
-                st.error(f"Simulation failed: {exc}")
+    with st.container(border=True):
+        st.caption("Compaction-pressure sweep")
+        cp_min, cp_max = st.slider(
+            "Compaction-pressure range (MPa)",
+            min_value=30.0,
+            max_value=450.0,
+            value=(min(max(cp_default_low, 30.0), 430.0), min(max(cp_default_high, 50.0), 450.0)),
+            step=5.0,
+        )
+        n_runs = st.slider("Number of profile points", min_value=3, max_value=20, value=7, step=1)
+        if cp_min >= cp_max:
+            st.error("The lower pressure must be smaller than the upper pressure.")
 
-# ── Results ───────────────────────────────────────────────────────────────────
+    run_disabled = len(valid_df) == 0 or cp_min >= cp_max
+    run_clicked = st.button("Run empirical profile", type="primary", use_container_width=True, disabled=run_disabled)
+
+if run_clicked:
+    try:
+        payload = normalise_formulation_frame(edited_df, label_to_id)
+        result = multiple_run(
+            titles=payload.titles,
+            components=payload.components,
+            fractions=payload.fractions,
+            cp_range=(cp_min, cp_max),
+            n_runs=n_runs,
+        )
+        st.session_state["mr_result"] = result
+        st.session_state["mr_payload"] = {
+            "components": payload.components,
+            "fractions": payload.fractions,
+            "summary": summarise_formulation(payload, options),
+            "cp_min": cp_min,
+            "cp_max": cp_max,
+            "n_runs": n_runs,
+        }
+    except Exception as exc:
+        st.error(f"Profile simulation failed: {exc}")
+
 result = st.session_state.get("mr_result")
-with res_col:
+payload_info = st.session_state.get("mr_payload", {})
+
+with result_col:
     if result is None:
-        with st.container(border=True):
-            st.markdown(
-                '<div style="text-align:center;padding:3rem 0;opacity:0.4">'
-                '<div style="font-size:3rem">📈</div>'
-                '<div style="font-size:1.1rem;margin-top:.5rem">'
-                'Configure the formulation and click <strong>▶ Run Profile</strong>'
-                "</div></div>",
-                unsafe_allow_html=True,
-            )
+        render_empty_state("📈", "No profile yet", "Build a formulation and run the live /multiple_run endpoint to generate compressibility and tensile profiles.")
         st.stop()
 
-    results_df  = pd.DataFrame(result.get("results_df", []))
-    kp          = result.get("kawakita_params", {})
-    dp          = result.get("duckworth_params", {})
-    cp_min_used = st.session_state.get("mr_cp_min", 70.0)
-    cp_max_used = st.session_state.get("mr_cp_max", 250.0)
+    results_df = pd.DataFrame(result.get("results_df", []))
+    metrics = derived_metrics(result)
+    kawakita = result.get("kawakita_params", {})
+    duckworth = result.get("duckworth_params", {})
 
-    st.markdown(f"### Results  ·  {cp_min_used:.0f} – {cp_max_used:.0f} MPa")
+    st.caption(f"Formulation: {payload_info.get('summary', '')}")
     st.caption(
-        "Formulation: "
-        + " · ".join(
-            f"{component_label(c)} ({f:.3f})"
-            for c, f in zip(
-                st.session_state.get("mr_comp_ids", []),
-                st.session_state.get("mr_fracs", []),
-            )
-        )
+        f"Pressure range: {payload_info.get('cp_min', cp_min):.0f} to {payload_info.get('cp_max', cp_max):.0f} MPa · {payload_info.get('n_runs', n_runs)} evaluations"
     )
 
-    tab_comp, tab_ten, tab_emp, tab_gran, tab_form, tab_raw = st.tabs([
-        "📊 Compressibility",
-        "💪 Tensile Strength",
-        "🧮 Empirical Models",
-        "⚖️ Granular Props",
-        "🍩 Formulation",
-        "📋 Raw Data",
-    ])
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Initial porosity a0", f"{float(kawakita.get('init_por', 0.0)):.4f}")
+    k2.metric("Kawakita B", f"{float(kawakita.get('B', 0.0)):.5f}")
+    k3.metric("Duckworth t-hat", f"{float(duckworth.get('t_hat', 0.0)):.4f} MPa")
+    k4.metric("Duckworth kB", f"{float(duckworth.get('kb', 0.0)):.5f}")
 
-    # ── Compressibility profile ──────────────────────────────────────────
-    with tab_comp:
-        st.plotly_chart(compressibility_figure(results_df), use_container_width=True)
-        if kp:
-            kc1, kc2, kc3 = st.columns(3)
-            kc1.metric(
-                "Initial Porosity (a₀)",
-                f"{kp.get('init_por', 0):.5f}"
-                if isinstance(kp.get("init_por"), float) else "N/A",
-            )
-            kc2.metric(
-                "Kawakita Constant (B)",
-                f"{kp.get('B', 0):.6f}"
-                if isinstance(kp.get("B"), float) else "N/A",
-            )
-            kc3.metric("CP Range (MPa)", f"{cp_min_used:.0f} – {cp_max_used:.0f}")
-        st.caption(
-            "Shaded band = ±17 % prediction interval on the Kawakita model fit "
-            "(empirical calibration from experimental validation data)."
+    tab_profiles, tab_snapshot, tab_formulation, tab_raw = st.tabs(
+        ["Profiles", "Blend snapshot", "Formulation", "Raw output"]
+    )
+
+    with tab_profiles:
+        left, right = st.columns(2, gap="large")
+        with left:
+            st.plotly_chart(compressibility_figure(results_df), use_container_width=True)
+            st.caption("Porosity response across compaction pressure from the empirical multi-run endpoint.")
+        with right:
+            st.plotly_chart(tensile_figure(results_df), use_container_width=True)
+            st.caption("Tensile strength profile propagated through the Duckworth relation.")
+        st.dataframe(results_df, use_container_width=True, hide_index=True)
+
+    with tab_snapshot:
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("FFC", f"{result['ffc']:.3f}")
+        s2.metric("Flow class", metrics["flow_class"])
+        s3.metric("Porosity mean", f"{result['porosity_mean']:.4f}")
+        s4.metric("Tensile mean", f"{result['tensile_mean']:.3f} MPa")
+        st.info(
+            f"Lower-bound pressure blend snapshot: Carr's index {metrics['carrs_index']:.2f} %, Hausner ratio {metrics['hausner_ratio']:.3f}, EAOIF {result['effective_angle_of_internal_friction']:.2f}°."
         )
+        if result["effective_angle_of_internal_friction"] > 41.0:
+            st.warning("EAOIF exceeds the common 41° practical threshold for good powder flow.")
 
-    # ── Tensile strength profile ─────────────────────────────────────────
-    with tab_ten:
-        st.plotly_chart(tensile_figure(results_df), use_container_width=True)
-        if dp:
-            dc1, dc2 = st.columns(2)
-            dc1.metric(
-                "t̂ — Zero-porosity Tensile (MPa)",
-                f"{dp.get('t_hat', 0):.5f}"
-                if isinstance(dp.get("t_hat"), float) else "N/A",
-            )
-            dc2.metric(
-                "k_B — Sensitivity Constant",
-                f"{dp.get('kb', 0):.6f}"
-                if isinstance(dp.get("kb"), float) else "N/A",
-            )
-        st.caption(
-            "Tensile strength is predicted via the Duckworth equation fitted to the "
-            "ML-predicted porosity profile.  Shaded band = ±17 % prediction interval."
-        )
+    with tab_formulation:
+        chart_left, chart_right = st.columns(2, gap="large")
+        chart_labels = [format_component_option(component_id, options) for component_id in payload_info.get("components", [])]
+        with chart_left:
+            st.plotly_chart(formulation_pie(chart_labels, payload_info.get("fractions", [])), use_container_width=True)
+        with chart_right:
+            st.plotly_chart(formulation_bar(chart_labels, payload_info.get("fractions", [])), use_container_width=True)
 
-    # ── Empirical model equations ────────────────────────────────────────
-    with tab_emp:
-        ec1, ec2 = st.columns(2)
-        with ec1:
-            st.markdown("#### Kawakita Equation")
-            st.latex(r"\varepsilon(P) = \dfrac{a_0}{1 + B \cdot P}")
-            st.markdown(
-                "| Symbol | Meaning |\n|--------|---------|\n"
-                "| ε | Porosity (–) |\n"
-                "| P | Compaction pressure (MPa) |\n"
-                "| a₀ | Initial porosity |\n"
-                "| B | Compressibility constant |"
-            )
-            if kp and isinstance(kp.get("init_por"), float) and isinstance(kp.get("B"), float):
-                st.info(f"**Fitted:** a₀ = {kp['init_por']:.5f},  B = {kp['B']:.6f}")
-
-        with ec2:
-            st.markdown("#### Duckworth Equation")
-            st.latex(r"\sigma_T(\varepsilon) = \hat{t} \cdot e^{-k_B \cdot \varepsilon}")
-            st.markdown(
-                "| Symbol | Meaning |\n|--------|---------|\n"
-                "| σ_T | Tensile strength (MPa) |\n"
-                "| ε | Porosity (–) |\n"
-                "| t̂ | Tensile strength at zero porosity |\n"
-                "| k_B | Porosity sensitivity constant |"
-            )
-            if dp and isinstance(dp.get("t_hat"), float) and isinstance(dp.get("kb"), float):
-                st.info(f"**Fitted:** t̂ = {dp['t_hat']:.5f},  k_B = {dp['kb']:.6f}")
-
-    # ── Granular properties (at cp_range[0]) ────────────────────────────
-    with tab_gran:
-        st.caption(f"Blend properties predicted at CP = {cp_min_used:.0f} MPa (lower bound of profile)")
-        bd       = result.get("bulk_density", 0)
-        td       = result.get("tapped_density", 0)
-        ci       = (td - bd) / td * 100 if td else 0.0
-        hr       = td / bd if bd else 0.0
-        ffc_val  = result.get("ffc", 0)
-        eaoif_val = result.get("effective_angle_of_internal_friction", 0.0)
-
-        gc1, gc2, gc3, gc4 = st.columns(4)
-        gc1.metric("True Density",   f"{result.get('true_density', 0):.4f} g/cm³")
-        gc2.metric("Bulk Density",   f"{bd:.4f} g/cm³")
-        gc3.metric("Tapped Density", f"{td:.4f} g/cm³")
-        gc4.metric("Carr's Index",   f"{ci:.2f} %")
-
-        gc5, gc6, gc7 = st.columns(3)
-        gc5.metric("Hausner Ratio",  f"{hr:.4f}")
-        gc6.metric("FFC",            f"{ffc_val:.4f}")
-        gc7.metric("EAOIF (°)",      f"{eaoif_val:.4f}")
-
-        if eaoif_val > 41.0:
-            st.warning(
-                f"EAOIF = {eaoif_val:.2f}° exceeds the recommended maximum of **41°**.",
-                icon="⚠️",
-            )
-
-    # ── Formulation composition ──────────────────────────────────────────
-    with tab_form:
-        titles_disp   = st.session_state.get("mr_titles", [])
-        fracs_disp    = st.session_state.get("mr_fracs", [])
-        comp_ids_disp = st.session_state.get("mr_comp_ids", [])
-        if titles_disp and fracs_disp:
-            pie_c, bar_c = st.columns(2)
-            with pie_c:
-                st.plotly_chart(
-                    formulation_pie(
-                        [component_label(c) for c in comp_ids_disp],
-                        fracs_disp,
-                    ),
-                    use_container_width=True,
-                )
-            with bar_c:
-                st.plotly_chart(
-                    formulation_bar(
-                        [component_label(c) for c in comp_ids_disp],
-                        fracs_disp,
-                    ),
-                    use_container_width=True,
-                )
-
-    # ── Raw data ─────────────────────────────────────────────────────────
     with tab_raw:
-        if not results_df.empty:
-            st.subheader("Compressibility Profile DataFrame")
-            st.dataframe(results_df, use_container_width=True)
-            st.download_button(
-                "⬇ Download CSV",
-                data=results_df.to_csv(index=False).encode(),
-                file_name="multiple_run_profile.csv",
-                mime="text/csv",
-            )
-        st.subheader("Full JSON Response")
-        st.json(result)
         st.download_button(
-            "⬇ Download JSON",
-            data=json.dumps(result, indent=2),
+            "Download JSON",
+            data=json.dumps(result, indent=2).encode("utf-8"),
             file_name="multiple_run_result.json",
             mime="application/json",
         )
+        st.json(result)
