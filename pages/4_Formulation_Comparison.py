@@ -222,7 +222,11 @@ with tab_form:
         with columns[idx % len(columns)]:
             st.caption(f"{item['name']} · {item['cp']:.0f} MPa")
             chart_labels = [format_component_option(component_id, options) for component_id in item["components"]]
-            st.plotly_chart(formulation_pie(chart_labels, item["fractions"]), use_container_width=True)
+            st.plotly_chart(
+                formulation_pie(chart_labels, item["fractions"]),
+                use_container_width=True,
+                key=f"cmp_formulation_pie_{idx}",
+            )
 
 with tab_raw:
     export_payload = {
