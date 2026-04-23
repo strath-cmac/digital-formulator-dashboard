@@ -27,7 +27,7 @@ _BASE_LAYOUT: dict = dict(
     plot_bgcolor="rgba(255,250,241,0.78)",
     font=dict(family="IBM Plex Sans, sans-serif", size=13, color="#17313e"),
     margin=dict(l=55, r=20, t=48, b=48),
-    title=dict(font=dict(family="Space Grotesk, sans-serif", size=18, color="#17313e")),
+    title_font=dict(family="Space Grotesk, sans-serif", size=18, color="#17313e"),
     xaxis=dict(gridcolor="rgba(23,49,62,0.08)", zerolinecolor="rgba(23,49,62,0.08)"),
     yaxis=dict(gridcolor="rgba(23,49,62,0.08)", zerolinecolor="rgba(23,49,62,0.08)"),
     legend=dict(bgcolor="rgba(255,255,255,0.55)", bordercolor="rgba(23,49,62,0.08)", borderwidth=1),
@@ -271,6 +271,7 @@ _POLAR_LAYOUT: dict = dict(
     template="plotly_white",
     paper_bgcolor="rgba(0,0,0,0)",
     font=dict(family="IBM Plex Sans, sans-serif", size=13, color="#17313e"),
+    title_font=dict(family="Space Grotesk, sans-serif", size=18, color="#17313e"),
     margin=dict(l=60, r=60, t=68, b=60),
 )
 
