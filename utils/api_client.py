@@ -25,13 +25,64 @@ _RESOLVED_BASE_URL: Optional[str] = None
 _LAST_OPTIONS: Dict[str, Any] = {}
 _COMPONENTS_CACHE: Dict[str, Dict[str, str]] = {}
 
+_BUILTIN_COMPONENT_LABELS: Dict[str, str] = {
+    "cc1": "Croscarmellose sodium",
+    "ms1": "Magnesium stearate",
+    "la1": "Lactose monohydrate",
+    "la3": "Lactose monohydrate (LH300)",
+    "la4": "Lactose monohydrate (SV003)",
+    "la5": "Lactose monohydrate",
+    "la6": "Lactose monohydrate (ST14SD)",
+    "la8": "Lactose monohydrate (Pharmatose 450M)",
+    "la9": "Lactose monohydrate (ST30SD)",
+    "la10": "Lactose monohydrate (Tablettose 100)",
+    "ma1": "Mannitol (Pearlitol 200SD)",
+    "ma2": "Mannitol",
+    "mc1": "MCC (Avicel PH102-like)",
+    "mc2": "MCC",
+    "mc4": "MCC",
+    "mc5": "MCC (Avicel PH101)",
+    "mc6": "MCC (Avicel PH102)",
+    "mc7": "MCC (Avicel PH200)",
+    "sh14": "HPMC (Pharmacoat 603)",
+    "sh15": "HPMC (Methocel K4M)",
+    "sh16": "HPMC",
+    "dc1": "Di-calcium phosphate",
+    "gr1": "Granulated excipient",
+    "gr2": "Granulated excipient",
+    "sp1": "Starch",
+    "sp2": "Starch",
+    "sp3": "Starch",
+    "sp4": "Starch",
+    "sp5": "Starch",
+    "ms2": "Magnesium stearate alt.",
+    "ms4": "Magnesium stearate alt.",
+    "ms5": "Magnesium stearate alt.",
+    "as1": "API - as1",
+    "as2": "API - as2",
+    "dm1": "Dexamethasone [API]",
+    "ib1": "Ibuprofen - ib1 [API]",
+    "ib2": "Ibuprofen [API]",
+    "ib6": "Ibuprofen - ib6 [API]",
+    "rp1": "API - rp1 [API]",
+    "sh1": "API - sh1 [API]",
+    "sh2": "API - sh2 [API]",
+    "caf": "Caffeine [API]",
+}
+
+_BUILTIN_API_IDS: frozenset[str] = frozenset(
+    {"as1", "as2", "dm1", "ib1", "ib2", "ib6", "rp1", "sh1", "sh2", "caf"}
+)
+
 _DEFAULT_FALLBACK_OPTIONS: Dict[str, Any] = {
-    "available_components": [],
-    "available_apis": [],
-    "available_excipients": [],
+    "available_components": sorted(_BUILTIN_COMPONENT_LABELS.keys()),
+    "available_apis": sorted(_BUILTIN_API_IDS),
+    "available_excipients": sorted(
+        component_id for component_id in _BUILTIN_COMPONENT_LABELS if component_id not in _BUILTIN_API_IDS
+    ),
     "available_objectives": [],
     "available_constraints": [],
-    "component_names": {},
+    "component_names": dict(_BUILTIN_COMPONENT_LABELS),
     "current_defaults": {},
     "options_degraded": True,
 }
@@ -178,10 +229,28 @@ def get_components(force_refresh: bool = False) -> Dict[str, Dict[str, str]]:
         registry["apis"] = _coerce_string_dict(raw.get("apis"))
         registry["excipients"] = _coerce_string_dict(raw.get("excipients"))
     except Exception:
-        registry = {"all": {}, "apis": {}, "excipients": {}}
+        registry = {
+            "all": dict(_BUILTIN_COMPONENT_LABELS),
+            "apis": {component_id: _BUILTIN_COMPONENT_LABELS[component_id] for component_id in _BUILTIN_API_IDS},
+            "excipients": {
+                component_id: label
+                for component_id, label in _BUILTIN_COMPONENT_LABELS.items()
+                if component_id not in _BUILTIN_API_IDS
+            },
+        }
 
     if not registry["all"]:
         registry["all"] = {**registry["excipients"], **registry["apis"]}
+
+    if not registry["all"]:
+        registry["all"] = dict(_BUILTIN_COMPONENT_LABELS)
+
+    if not registry["apis"]:
+        registry["apis"] = {
+            component_id: registry["all"].get(component_id, _BUILTIN_COMPONENT_LABELS[component_id])
+            for component_id in _BUILTIN_API_IDS
+            if component_id in registry["all"] or component_id in _BUILTIN_COMPONENT_LABELS
+        }
 
     if not registry["excipients"] and registry["all"]:
         api_ids = set(registry["apis"])
