@@ -66,9 +66,11 @@ if "api_options" not in st.session_state:
 
 opts           = st.session_state["api_options"]
 all_excipients = opts.get("available_excipients", [])
+all_apis       = opts.get("available_apis", [])
+all_components = all_apis + all_excipients   # APIs listed first
 
-if not all_excipients:
-    st.error("No excipients returned by the API. Is the backend running?")
+if not all_components:
+    st.error("No components returned by the API. Is the backend running?")
     st.stop()
 
 # ── Default component sets per slot ──────────────────────────────────────

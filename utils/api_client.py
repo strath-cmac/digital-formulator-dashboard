@@ -30,8 +30,13 @@ TIMEOUT_LONG: int = 900   # optimiser can run for many minutes
 # ── Component display labels ────────────────────────────────────────────
 # Hardcoded fallback — the FastAPI /options endpoint only returns IDs.
 KNOWN_COMPONENT_LABELS: Dict[str, str] = {
+    # ── Active Pharmaceutical Ingredients ──────────────────────────────
+    "dm1":  "Dexamethasone",
+    # ── Excipients: disintegrants ────────────────────────────────────
     "cc1":  "Croscarmellose Sodium",
+    # ── Excipients: lubricants ────────────────────────────────────────
     "ms1":  "Magnesium Stearate",
+    # ── Excipients: fillers / diluents ────────────────────────────────
     "la3":  "Lactose (Lactohale LH300)",
     "la4":  "Lactose (Respitose SV003)",
     "la6":  "Lactose (SuperTab 14SD)",
@@ -42,17 +47,23 @@ KNOWN_COMPONENT_LABELS: Dict[str, str] = {
     "mc5":  "MCC (Avicel PH101)",
     "mc6":  "MCC (Avicel PH102)",
     "mc7":  "MCC (Avicel PH200)",
+    # ── Excipients: binders / matrix formers ─────────────────────────
     "sh14": "HPMC (Pharmacoat 603)",
     "sh15": "HPMC (Methocel K4M)",
     "sh16": "HPMC",
-    "dm1":  "Dexamethasone",
 }
+
+# IDs that are Active Pharmaceutical Ingredients (not excipients).
+# Used to tag labels and populate available_apis in options.
+KNOWN_API_IDS: List[str] = ["dm1"]
 
 # ── Hardcoded fallback for /options ────────────────────────────────────
 # Used when the /digital_formulator/options endpoint returns 5xx.
 # Values mirror insilico_formulation_optimisation_v4.py defaults.
 _FALLBACK_OPTIONS: Dict = {
-    "available_excipients": sorted(KNOWN_COMPONENT_LABELS.keys()),
+    # APIs and excipients are kept separate — scientifically distinct roles.
+    "available_apis":       list(KNOWN_API_IDS),
+    "available_excipients": sorted(c for c in KNOWN_COMPONENT_LABELS if c not in KNOWN_API_IDS),
     "available_objectives": [
         "maximise_tensile",
         "minimise_tablet_weight",
@@ -92,9 +103,16 @@ _FALLBACK_OPTIONS: Dict = {
 
 
 def component_label(cid: str) -> str:
-    """Return a human-readable label for a component ID."""
+    """Return a human-readable label for a component ID.
+
+    APIs are tagged with '[API]' so they are visually distinct from excipients
+    in every formulation builder dropdown.
+    """
     name = KNOWN_COMPONENT_LABELS.get(cid)
-    return f"{name} ({cid})" if name else cid
+    if name is None:
+        return cid
+    tag = " [API]" if cid in KNOWN_API_IDS else ""
+    return f"{name}{tag} ({cid})"
 
 
 def component_short_name(cid: str) -> str:
@@ -152,8 +170,15 @@ def get_options() -> Dict:
     pipeline data fails to load), silently falls back to hardcoded defaults
     so the rest of the dashboard remains fully functional.
     """
+    def _inject_apis(opts: Dict) -> Dict:
+        """Ensure available_apis is populated even if the backend omits it."""
+        if "available_apis" not in opts:
+            opts = dict(opts)
+            opts["available_apis"] = list(KNOWN_API_IDS)
+        return opts
+
     try:
-        return _get("/digital_formulator/options")
+        return _inject_apis(_get("/digital_formulator/options"))
     except requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code >= 500:
             return _FALLBACK_OPTIONS

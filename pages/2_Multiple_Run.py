@@ -22,11 +22,13 @@ if "api_options" not in st.session_state:
 
 opts           = st.session_state["api_options"]
 all_excipients = opts.get("available_excipients", [])
-if not all_excipients:
-    st.error("No excipients returned by the API."); st.stop()
+all_apis       = opts.get("available_apis", [])
+all_components = all_apis + all_excipients   # APIs listed first
+if not all_components:
+    st.error("No components returned by the API."); st.stop()
 
-_label_options = [component_label(e) for e in all_excipients]
-_id_from_label = {component_label(e): e for e in all_excipients}
+_label_options = [component_label(c) for c in all_components]
+_id_from_label = {component_label(c): c for c in all_components}
 
 st.markdown("# \U0001f4c8 Multiple-Run Simulation")
 st.markdown("Generate a compressibility and tensile-strength **profile across a compaction-pressure range** using Kawakita and Duckworth models.")

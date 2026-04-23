@@ -83,9 +83,11 @@ if "api_options" not in st.session_state:
 
 opts           = st.session_state["api_options"]
 all_excipients = opts.get("available_excipients", [])
+all_apis       = opts.get("available_apis", [])
+all_components = all_apis + all_excipients   # APIs listed first
 
-if not all_excipients:
-    st.error("No excipients returned by the API. Is the backend running?")
+if not all_components:
+    st.error("No components returned by the API. Is the backend running?")
     st.stop()
 
 # ── Configuration ────────────────────────────────────────────────────────
@@ -113,7 +115,7 @@ with cfg_col:
         safe_defs  = [d for d in _DEFAULTS if d in all_excipients]
         selected: list[str] = st.multiselect(
             "Components",
-            options=all_excipients,
+            options=all_components,
             default=safe_defs if safe_defs else all_excipients[:3],
             format_func=component_label,
             key="sa_sel",
