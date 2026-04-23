@@ -20,7 +20,7 @@ try:
 except ImportError:
     pass
 
-BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8080").rstrip("/")
+BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 # Timeout constants (seconds)
 TIMEOUT_SHORT: int = 30

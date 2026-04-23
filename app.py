@@ -50,7 +50,7 @@ msg = st.session_state.get("api_msg", "Not yet checked")
 
 with status_col:
     if ok:
-        api_url = os.getenv("API_BASE_URL", "http://localhost:8080")
+        api_url = os.getenv("API_BASE_URL", "http://localhost:8000")
         st.success(f"✅  API Connected  ·  {api_url}")
     else:
         st.error(f"❌  API Unavailable — {msg}")
@@ -58,7 +58,7 @@ with status_col:
 if not ok:
     st.info(
         "Make sure the Digital Formulator API is running and that `API_BASE_URL` "
-        f"is set correctly (currently `{os.getenv('API_BASE_URL', 'http://localhost:8080')}`)."
+        f"is set correctly (currently `{os.getenv('API_BASE_URL', 'http://localhost:8000')}`)."
     )
     st.stop()
 
