@@ -96,11 +96,11 @@ with cfg_col:
     with st.container(border=True):
         st.caption("Base Formulation")
         _DEFAULTS = ["mc5", "la9", "cc1", "ms1"]
-        safe_defs  = [d for d in _DEFAULTS if d in all_excipients]
+        safe_defs  = [d for d in _DEFAULTS if d in all_components]
         selected: list[str] = st.multiselect(
             "Components",
             options=all_components,
-            default=safe_defs if safe_defs else all_excipients[:3],
+            default=safe_defs if safe_defs else all_components[:3],
             format_func=component_label,
             key="sa_sel",
             label_visibility="collapsed",
@@ -417,15 +417,17 @@ with tab_morph_note:
         "For morphology visualisation at a fixed formulation, use the **Single Run** page."
     )
     if sa_mode == "Vary Fraction":
-        saved_comps2  = st.session_state.get("sa_comps", [])
-        saved_titles2 = st.session_state.get("sa_titles", [])
-        saved_fracs2  = st.session_state.get("sa_fracs", {})
-        if saved_comps2 and saved_titles2:
+        saved_comps2 = st.session_state.get("sa_comps", [])
+        saved_fracs2 = st.session_state.get("sa_fracs", {})
+        if saved_comps2:
             total_f2    = sum(saved_fracs2.values())
             base_fracs2 = [v / total_f2 for v in saved_fracs2.values()]
             st.subheader("Base Formulation Composition")
             st.plotly_chart(
-                formulation_pie(saved_titles2, base_fracs2),
+                formulation_pie(
+                    [component_label(c) for c in saved_comps2],
+                    base_fracs2,
+                ),
                 use_container_width=True,
             )
 

@@ -26,6 +26,7 @@ from utils.api_client import (
     single_run,
     component_label,
     component_short_name,
+    is_api,
 )
 from utils.plotting import (
     radar_chart,
@@ -59,18 +60,18 @@ if not all_components:
 
 # ── Default component sets per slot ──────────────────────────────────────
 _SLOT_DEFAULTS: list[list[str]] = [
-    ["mc5", "la9", "cc1", "ms1"],
-    ["mc6", "la6", "cc1", "ms1"],
-    ["mc7", "la3", "cc1", "ms1"],
-    ["mc5", "ma1", "cc1", "ms1"],
-    ["mc6", "la8", "cc1", "ms1"],
+    ["dm1", "mc5", "la9", "cc1", "ms1"],
+    ["dm1", "mc6", "la6", "cc1", "ms1"],
+    ["dm1", "mc7", "la3", "cc1", "ms1"],
+    ["dm1", "mc5", "ma1", "cc1", "ms1"],
+    ["dm1", "mc6", "la8", "cc1", "ms1"],
 ]
 
 
-def _safe_defaults(exc_list: list[str], slot: int) -> list[str]:
+def _safe_defaults(comp_list: list[str], slot: int) -> list[str]:
     defs = _SLOT_DEFAULTS[slot % len(_SLOT_DEFAULTS)]
-    safe = [d for d in defs if d in exc_list]
-    return safe if safe else exc_list[: min(3, len(exc_list))]
+    safe = [d for d in defs if d in comp_list]
+    return safe if safe else comp_list[: min(3, len(comp_list))]
 
 
 # ── Properties shown in the comparison table ──────────────────────────────
@@ -127,8 +128,8 @@ with st.container(border=True):
                 )
                 selected: list[str] = st.multiselect(
                     "Components",
-                    options=all_excipients,
-                    default=_safe_defaults(all_excipients, i),
+                    options=all_components,
+                    default=_safe_defaults(all_components, i),
                     format_func=component_label,
                     key=f"cf_sel_{i}",
                     label_visibility="collapsed",
@@ -344,7 +345,10 @@ with tab_form:
             cp_used = cfg["cp"]
             st.caption(f"**{cfg['name']}**  ·  CP = {cp_used:.0f} MPa")
             st.plotly_chart(
-                formulation_pie(results[i]["titles"], results[i]["fracs"]),
+                formulation_pie(
+                    [component_label(c) for c in results[i]["comps"]],
+                    results[i]["fracs"],
+                ),
                 use_container_width=True,
             )
 

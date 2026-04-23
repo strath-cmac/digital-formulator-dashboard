@@ -10,7 +10,7 @@ at import time from the environment variable ``API_BASE_URL``
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -71,18 +71,83 @@ _FALLBACK_OPTIONS: Dict = {
     },
 }
 
-def component_label(cid: str) -> str:
-    """Return a label for a component ID.
+# ── Known component name lookup ──────────────────────────────────────────
+# Built from the model project's COMPONENT_NAMES dict (commented reference)
+# and extended with known API identifiers.  Falls back to the raw ID for
+# any component not listed here (e.g. new materials added to the database).
+_COMPONENT_LABELS: Dict[str, str] = {
+    # ── Disintegrant ─────────────────────────────────────────────────────
+    "cc1":  "Croscarmellose sodium",
+    # ── Lubricant ─────────────────────────────────────────────────────────
+    "ms1":  "Magnesium stearate",
+    # ── Lactose variants ─────────────────────────────────────────────────
+    "la1":  "Lactose monohydrate",
+    "la3":  "Lactose monohydrate (LH300)",
+    "la4":  "Lactose monohydrate (SV003)",
+    "la5":  "Lactose monohydrate",
+    "la6":  "Lactose monohydrate (ST14SD)",
+    "la8":  "Lactose monohydrate (Pharmatose 450M)",
+    "la9":  "Lactose monohydrate (ST30SD)",
+    "la10": "Lactose monohydrate (Tablettose 100)",
+    # ── Mannitol ─────────────────────────────────────────────────────────
+    "ma1":  "Mannitol (Pearlitol 200SD)",
+    "ma2":  "Mannitol",
+    # ── Microcrystalline cellulose ────────────────────────────────────────
+    "mc1":  "MCC (Avicel PH102-like)",
+    "mc2":  "MCC",
+    "mc4":  "MCC",
+    "mc5":  "MCC (Avicel PH101)",
+    "mc6":  "MCC (Avicel PH102)",
+    "mc7":  "MCC (Avicel PH200)",
+    # ── HPMC ─────────────────────────────────────────────────────────────
+    "sh14": "HPMC (Pharmacoat 603)",
+    "sh15": "HPMC (Methocel K4M)",
+    "sh16": "HPMC",
+    # ── Other excipients ─────────────────────────────────────────────────
+    "dc1":  "Di-calcium phosphate",
+    "gr1":  "Granulated excipient",
+    "gr2":  "Granulated excipient",
+    "sp1":  "Starch",
+    "sp2":  "Starch",
+    "sp3":  "Starch",
+    "sp4":  "Starch",
+    "sp5":  "Starch",
+    "ms2":  "Magnesium stearate alt.",
+    "ms4":  "Magnesium stearate alt.",
+    "ms5":  "Magnesium stearate alt.",
+    # ── Active Pharmaceutical Ingredients ────────────────────────────────
+    "as1":  "API — as1",
+    "as2":  "API — as2",
+    "dm1":  "Dexamethasone [API]",
+    "ib1":  "Ibuprofen — ib1 [API]",
+    "ib2":  "Ibuprofen [API]",
+    "ib6":  "Ibuprofen — ib6 [API]",
+    "rp1":  "API — rp1 [API]",
+    "sh1":  "API — sh1 [API]",
+    "sh2":  "API — sh2 [API]",
+    "caf":  "Caffeine [API]",
+}
 
-    The backend does not expose a name-lookup endpoint, so the component
-    ID is returned as-is.
-    """
-    return cid
+# IDs considered active pharmaceutical ingredients (for UI labelling)
+_API_IDS: frozenset = frozenset({
+    "as1", "as2", "dm1", "ib1", "ib2", "ib6", "rp1", "sh1", "sh2", "caf",
+})
+
+
+def component_label(cid: str) -> str:
+    """Return a human-readable display label for a component ID."""
+    return _COMPONENT_LABELS.get(cid, cid)
 
 
 def component_short_name(cid: str) -> str:
-    """Return the short name for a component ID (same as the ID)."""
+    """Return the short identifier used as the API `title` field (always the raw ID)."""
     return cid
+
+
+def is_api(cid: str) -> bool:
+    """Return True if the component ID is a known active pharmaceutical ingredient."""
+    label = _COMPONENT_LABELS.get(cid, "")
+    return cid in _API_IDS or "[API]" in label
 
 
 # ── Internal helpers ────────────────────────────────────────────────────
@@ -130,22 +195,33 @@ def get_options() -> Dict:
     """
     GET /digital_formulator/options
 
-    Returns available objectives, constraints, excipients, and current
-    defaults.  Augments the response with ``available_apis`` and
-    ``component_names`` from GET /components (process-cached) when the
-    backend does not supply them directly.
+    The backend returns all materials (APIs + excipients) together under
+    ``available_excipients``.  This function post-processes the response to
+    split them into ``available_apis`` and ``available_excipients`` using the
+    local ``is_api()`` lookup, so the rest of the dashboard can distinguish
+    between the two categories.
 
-    Falls back to minimal built-in defaults on 5xx errors so the
+    Falls back to minimal built-in defaults on any error so the
     dashboard remains usable when the API is degraded.
     """
     try:
-        return _get("/digital_formulator/options")
+        raw = _get("/digital_formulator/options")
     except requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code >= 500:
             return _FALLBACK_OPTIONS
         raise
     except Exception:
         return _FALLBACK_OPTIONS
+
+    # Backend merges all materials into available_excipients.
+    # Split them here so the UI can present APIs and excipients separately.
+    all_comps: List[str] = raw.get("available_excipients", [])
+    if not raw.get("available_apis"):
+        # Backend did not separate them — split by local knowledge.
+        raw["available_apis"]      = [c for c in all_comps if is_api(c)]
+        raw["available_excipients"] = [c for c in all_comps if not is_api(c)]
+
+    return raw
 
 
 def single_run(
