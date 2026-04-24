@@ -11,6 +11,9 @@ from utils.api_client import (
     component_short_name,
     get_api_contract,
     get_component_choices,
+    get_disintegrant_choices,
+    get_filler_choices,
+    get_lubricant_choices,
     get_options,
     health_check,
     is_api,
@@ -26,6 +29,26 @@ class FormulationPayload:
     total_fraction: float
 
 
+def render_top_nav() -> None:
+    """Render a horizontal top navigation bar using Streamlit page_link elements."""
+    c0, c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.9, 0.9, 1.0, 1.5, 1.3, 1.2])
+    with c0:
+        st.markdown("<div class='topnav-brand'>🧬 DM² Formulator</div>", unsafe_allow_html=True)
+    with c1:
+        st.page_link("app.py", label="Home", use_container_width=True)
+    with c2:
+        st.page_link("pages/1_Single_Run.py", label="Single Run", use_container_width=True)
+    with c3:
+        st.page_link("pages/2_Multiple_Run.py", label="Multi-Run", use_container_width=True)
+    with c4:
+        st.page_link("pages/3_Digital_Formulator.py", label="Digital Formulator", use_container_width=True)
+    with c5:
+        st.page_link("pages/4_Formulation_Comparison.py", label="Comparison", use_container_width=True)
+    with c6:
+        st.page_link("pages/5_Sensitivity_Analysis.py", label="Sensitivity", use_container_width=True)
+    st.markdown("<div class='topnav-divider'></div>", unsafe_allow_html=True)
+
+
 def render_page_header(title: str, subtitle: str, badge: Optional[str] = None) -> None:
     badge_html = f"<span class='page-badge'>{badge}</span>" if badge else ""
     st.markdown(
@@ -33,7 +56,7 @@ def render_page_header(title: str, subtitle: str, badge: Optional[str] = None) -
 <div class='page-shell'>
   <div class='page-header'>
     <div>
-      <div class='page-kicker'>Digital Formulator Dashboard</div>
+      <div class='page-kicker'>DM² · CMAC · University of Strathclyde</div>
       <div class='ph-title'>{title}</div>
       <div class='ph-sub'>{subtitle}</div>
     </div>
@@ -240,3 +263,200 @@ def derived_metrics(result: Dict[str, Any]) -> Dict[str, Any]:
 
 def objective_mode(selected_objectives: List[str]) -> str:
     return "Single-objective GA" if len(selected_objectives) == 1 else "Multi-objective NSGA-II"
+
+
+def render_smart_formulation_editor(
+    options: Dict[str, Any],
+    key_prefix: str,
+    show_reset: bool = True,
+) -> Tuple[pd.DataFrame, bool]:
+    """
+    Render a role-aware formulation builder with separate sections for API,
+    disintegrant (CCS), lubricant (MgSt), and filler excipients.
+
+    Returns (DataFrame with Component/Fraction columns, is_valid).
+    The Component column contains display labels compatible with normalise_formulation_frame().
+    """
+    defaults = options.get("current_defaults", {})
+    api_ids = options.get("available_apis", []) or get_component_choices(options)
+    disint_ids = get_disintegrant_choices(options)
+    lubricant_ids = get_lubricant_choices(options)
+    filler_ids = get_filler_choices(options)
+
+    _, label_to_id = component_select_maps(options)
+    id_to_label: Dict[str, str] = {v: k for k, v in label_to_id.items()}
+
+    def _fmt(cid: str) -> str:
+        return format_component_option(cid, options)
+
+    # Reset helper
+    def _clear_state() -> None:
+        for k in list(st.session_state.keys()):
+            if k.startswith(f"_sfe_{key_prefix}_"):
+                del st.session_state[k]
+
+    if show_reset:
+        hcol1, hcol2 = st.columns([4, 1])
+        with hcol1:
+            st.markdown("<p class='form-section-title'>Formulation Builder</p>", unsafe_allow_html=True)
+        with hcol2:
+            if st.button("↺ Reset", key=f"_sfe_{key_prefix}_reset_btn", use_container_width=True):
+                _clear_state()
+                st.rerun()
+
+    # ── 1. API ─────────────────────────────────────────────────────────────────
+    with st.container(border=True):
+        st.markdown(
+            "<div class='role-pill role-api'>💊 API — Active Pharmaceutical Ingredient</div>",
+            unsafe_allow_html=True,
+        )
+        a1, a2 = st.columns([3, 1])
+        api_id = a1.selectbox(
+            "API",
+            options=api_ids,
+            format_func=_fmt,
+            key=f"_sfe_{key_prefix}_api",
+            label_visibility="collapsed",
+        )
+        api_frac = a2.number_input(
+            "API fraction",
+            min_value=0.01,
+            max_value=0.80,
+            value=0.20,
+            step=0.01,
+            key=f"_sfe_{key_prefix}_api_f",
+            format="%.3f",
+            label_visibility="collapsed",
+        )
+
+    # ── 2. Disintegrant + Lubricant ────────────────────────────────────────────
+    with st.container(border=True):
+        d_col, l_col = st.columns(2, gap="medium")
+
+        with d_col:
+            st.markdown(
+                "<div class='role-pill role-disint'>🧪 Disintegrant — CCS</div>",
+                unsafe_allow_html=True,
+            )
+            default_disint = defaults.get("disintegrant_id")
+            disint_opts = disint_ids if disint_ids else list(label_to_id.values())
+            disint_default_idx = 0
+            if default_disint and default_disint in disint_opts:
+                disint_default_idx = disint_opts.index(default_disint)
+            disint_id = st.selectbox(
+                "Disintegrant",
+                options=disint_opts,
+                format_func=_fmt,
+                index=disint_default_idx,
+                key=f"_sfe_{key_prefix}_di",
+                label_visibility="collapsed",
+            )
+            disint_frac = st.number_input(
+                "Disint fraction",
+                min_value=0.01,
+                max_value=0.20,
+                value=float(defaults.get("disintegrant_fraction", 0.08)),
+                step=0.005,
+                key=f"_sfe_{key_prefix}_di_f",
+                format="%.3f",
+                label_visibility="collapsed",
+            )
+
+        with l_col:
+            st.markdown(
+                "<div class='role-pill role-lubricant'>⚙️ Lubricant — MgSt</div>",
+                unsafe_allow_html=True,
+            )
+            default_lubricant = defaults.get("lubricant_id")
+            lubricant_opts = lubricant_ids if lubricant_ids else list(label_to_id.values())
+            lubricant_default_idx = 0
+            if default_lubricant and default_lubricant in lubricant_opts:
+                lubricant_default_idx = lubricant_opts.index(default_lubricant)
+            lubricant_id = st.selectbox(
+                "Lubricant",
+                options=lubricant_opts,
+                format_func=_fmt,
+                index=lubricant_default_idx,
+                key=f"_sfe_{key_prefix}_lu",
+                label_visibility="collapsed",
+            )
+            lubricant_frac = st.number_input(
+                "Lubricant fraction",
+                min_value=0.001,
+                max_value=0.05,
+                value=float(defaults.get("lubricant_fraction", 0.01)),
+                step=0.001,
+                key=f"_sfe_{key_prefix}_lu_f",
+                format="%.3f",
+                label_visibility="collapsed",
+            )
+
+    # ── 3. Fillers ─────────────────────────────────────────────────────────────
+    with st.container(border=True):
+        st.markdown(
+            "<div class='role-pill role-filler'>📦 Fillers / Bulk Excipients</div>",
+            unsafe_allow_html=True,
+        )
+        filler_pool = filler_ids if filler_ids else [
+            cid for cid in list(label_to_id.values())
+            if cid not in {api_id, disint_id, lubricant_id}
+        ]
+        default_fillers = [
+            cid for cid in defaults.get("excipient_options", []) if cid in filler_pool
+        ] or filler_pool[:2]
+
+        selected_fillers = st.multiselect(
+            "Select fillers",
+            options=filler_pool,
+            default=[f for f in default_fillers if f in filler_pool],
+            format_func=_fmt,
+            key=f"_sfe_{key_prefix}_fillers",
+            label_visibility="collapsed",
+        )
+
+        fixed_sum = api_frac + disint_frac + lubricant_frac
+        remaining = max(0.0, 1.0 - fixed_sum)
+        filler_fracs: Dict[str, float] = {}
+
+        if selected_fillers:
+            auto_share = round(remaining / len(selected_fillers), 4)
+            pairs = [selected_fillers[i : i + 2] for i in range(0, len(selected_fillers), 2)]
+            for pair in pairs:
+                pair_cols = st.columns(len(pair), gap="small")
+                for ci, fid in enumerate(pair):
+                    with pair_cols[ci]:
+                        filler_fracs[fid] = st.number_input(
+                            _fmt(fid),
+                            min_value=0.001,
+                            max_value=0.99,
+                            value=auto_share,
+                            step=0.01,
+                            key=f"_sfe_{key_prefix}_ff_{fid}",
+                            format="%.3f",
+                        )
+
+    # ── Build output DataFrame ─────────────────────────────────────────────────
+    cids: List[str] = [api_id]
+    fracs: List[float] = [api_frac]
+    if disint_id:
+        cids.append(disint_id)
+        fracs.append(disint_frac)
+    if lubricant_id:
+        cids.append(lubricant_id)
+        fracs.append(lubricant_frac)
+    for fid in selected_fillers:
+        cids.append(fid)
+        fracs.append(filler_fracs.get(fid, 0.0))
+
+    display_labels = [id_to_label.get(cid, _fmt(cid)) for cid in cids]
+    df = pd.DataFrame({"Component": display_labels, "Fraction": fracs})
+
+    total = sum(fracs)
+    if total > 0:
+        if abs(total - 1.0) < 0.025:
+            st.success(f"Total fraction = {total:.4f} ✓")
+        else:
+            st.warning(f"Total fraction = {total:.4f} — will be normalised before submission")
+
+    is_valid = total > 0 and len(cids) >= 2
+    return df, is_valid

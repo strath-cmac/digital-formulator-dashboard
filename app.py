@@ -3,378 +3,311 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from utils.dashboard import get_component_catalog, refresh_api_state, render_page_header
+from utils.dashboard import get_component_catalog, refresh_api_state, render_page_header, render_top_nav
 
 
 st.set_page_config(
-    page_title="Digital Formulator Dashboard",
-    page_icon="💊",
+    page_title="DM² Digital Formulator",
+    page_icon="🧬",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 st.markdown(
     """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 
 :root {
-    --bg: #f4efe4;
-    --bg-deep: #ebe2d2;
-    --surface: rgba(255, 250, 241, 0.96);
-    --surface-strong: #fffdf8;
-    --surface-tint: rgba(246, 240, 230, 0.92);
-    --ink: #17313e;
-    --ink-soft: #274553;
-    --muted: #5b7380;
-    --muted-strong: #4d6470;
-    --line: rgba(23, 49, 62, 0.12);
-    --line-strong: rgba(23, 49, 62, 0.18);
-    --accent: #0b6e69;
-    --accent-strong: #075651;
-    --accent-soft: rgba(11, 110, 105, 0.12);
-    --signal: #b85c38;
-    --signal-soft: rgba(184, 92, 56, 0.14);
-    --sidebar-bg-top: #18323f;
-    --sidebar-bg-bottom: #102530;
-    --sidebar-text: #f2eadc;
-    --sidebar-text-soft: rgba(242, 234, 220, 0.82);
-    --sidebar-active-bg: rgba(255, 255, 255, 0.12);
-    --shadow: 0 16px 48px rgba(23, 49, 62, 0.08);
-    --shadow-soft: 0 10px 24px rgba(23, 49, 62, 0.06);
+    /* ── CMAC / Strathclyde Brand Palette ───────────────────────── */
+    --cmac-navy:        #002850;
+    --cmac-blue:        #0071CE;
+    --cmac-blue-dark:   #005A9E;
+    --cmac-blue-mid:    #D0E8F8;
+    --cmac-blue-light:  #EBF5FF;
+
+    --bg:               #EEF4FB;
+    --bg-deep:          #E0EAF5;
+    --surface:          #FFFFFF;
+    --surface-tint:     #F5F9FF;
+
+    --ink:              #0C1E2E;
+    --ink-soft:         #1A3A5C;
+    --muted:            #4A6A8A;
+    --muted-light:      #7A9BBB;
+
+    --line:             rgba(0, 56, 101, 0.10);
+    --line-strong:      rgba(0, 56, 101, 0.18);
+
+    --accent:           #0071CE;
+    --accent-strong:    #005A9E;
+    --accent-soft:      rgba(0, 113, 206, 0.10);
+    --accent-hover:     rgba(0, 113, 206, 0.18);
+
+    --success:          #1B7A3E;
+    --success-soft:     rgba(27, 122, 62, 0.10);
+    --warning-color:    #9A6B00;
+    --warning-soft:     rgba(154, 107, 0, 0.10);
+
+    --shadow-sm:        0 1px 4px rgba(0, 40, 90, 0.07);
+    --shadow:           0 2px 12px rgba(0, 40, 90, 0.09);
+    --shadow-md:        0 4px 24px rgba(0, 40, 90, 0.12);
+    --shadow-lg:        0 8px 40px rgba(0, 40, 90, 0.14);
+
+    --radius-sm:        6px;
+    --radius:           10px;
+    --radius-lg:        16px;
+    --radius-xl:        22px;
+    --radius-pill:      999px;
 }
 
-html, body, [class*='css']  {
-    font-family: 'IBM Plex Sans', sans-serif;
+/* ── Base ─────────────────────────────────────────────────────────── */
+html, body, [class*='css'] {
+    font-family: 'Inter', sans-serif;
     color: var(--ink);
 }
-
-body {
-    color: var(--ink);
-}
-
-p, li, label, .stMarkdown, .stCaption, .stText, .stAlert {
-    color: var(--ink);
-}
+body { color: var(--ink); }
+p, li, label, .stMarkdown, .stCaption, .stText, .stAlert { color: var(--ink); }
 
 [data-testid='stAppViewContainer'] {
-    background:
-        radial-gradient(circle at top right, rgba(11, 110, 105, 0.16), transparent 30%),
-        radial-gradient(circle at left top, rgba(184, 92, 56, 0.12), transparent 24%),
-        linear-gradient(180deg, #fbf7ef 0%, var(--bg) 60%, var(--bg-deep) 100%);
+    background: linear-gradient(160deg, var(--bg) 0%, #e8f0f9 50%, var(--bg-deep) 100%);
+    min-height: 100vh;
 }
 
-[data-testid='stHeader'] {
-    background: rgba(244, 239, 228, 0.78);
-    backdrop-filter: blur(10px);
+/* Hide default Streamlit header bar */
+[data-testid='stHeader'] { display: none !important; }
+[data-testid='stToolbar'] { display: none !important; }
+
+/* ── Sidebar: hide entirely (replaced by top nav) ─────────────────── */
+[data-testid='stSidebar'],
+[data-testid='stSidebarCollapsedControl'],
+section[data-testid='stSidebarContent'],
+[data-testid='collapsedControl'] {
+    display: none !important;
+}
+.main .block-container {
+    max-width: 1440px;
+    padding-top: 0 !important;
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+    padding-bottom: 3rem;
 }
 
-[data-testid='stToolbar'] {
-    right: 1rem;
-}
-
-[data-testid='stSidebar'] {
-    background: linear-gradient(180deg, var(--sidebar-bg-top) 0%, var(--sidebar-bg-bottom) 100%);
-    border-right: 1px solid rgba(255,255,255,0.08);
-}
-
-[data-testid='stSidebar'] * {
-    color: var(--sidebar-text);
-}
-
-[data-testid='stSidebar'] p,
-[data-testid='stSidebar'] li,
-[data-testid='stSidebar'] label,
-[data-testid='stSidebar'] span,
-[data-testid='stSidebar'] div,
-[data-testid='stSidebar'] a,
-[data-testid='stSidebar'] button {
-    color: var(--sidebar-text) !important;
-}
-
-[data-testid='stSidebarNav'] {
-    padding-top: 0.25rem;
-}
-
-[data-testid='stSidebarNav'] a {
-    background: transparent;
-    border-radius: 14px;
-    margin-bottom: 0.22rem;
-}
-
-[data-testid='stSidebarNav'] a:hover {
-    background: rgba(255,255,255,0.08);
-}
-
-[data-testid='stSidebarNav'] a[aria-current='page'] {
-    background: var(--sidebar-active-bg);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
-}
-
-[data-testid='stSidebarNav'] a[aria-current='page']:hover {
-    background: rgba(255,255,255,0.16);
-}
-
-[data-testid='stSidebarNav'] a[data-testid='stSidebarNavLink'] span {
-    color: var(--sidebar-text) !important;
-}
-
-[data-testid='stSidebarNav'] a[data-testid='stSidebarNavLink'] p,
-[data-testid='stSidebarNav'] a[data-testid='stSidebarNavLink'] div,
-[data-testid='stSidebarNav'] a[data-testid='stSidebarNavLink'] svg {
-    color: var(--sidebar-text) !important;
-    fill: var(--sidebar-text);
-}
-
-[data-testid='stSidebarNav'] a:not([aria-current='page']) [data-testid='stSidebarNavLink'] p,
-[data-testid='stSidebarNav'] a:not([aria-current='page']) [data-testid='stSidebarNavLink'] span {
-    color: var(--sidebar-text-soft) !important;
-}
-
-[data-testid='stSidebarNav'] a[aria-current='page'] [data-testid='stSidebarNavLink'] p,
-[data-testid='stSidebarNav'] a[aria-current='page'] [data-testid='stSidebarNavLink'] span,
-[data-testid='stSidebarNav'] a[aria-current='page'] [data-testid='stSidebarNavLink'] div,
-[data-testid='stSidebarNav'] a[aria-current='page'] [data-testid='stSidebarNavLink'] svg {
-    color: var(--sidebar-text) !important;
-    fill: var(--sidebar-text);
-    font-weight: 700;
-}
-
-.sidebar-brand {
-    background: linear-gradient(145deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04));
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 18px;
-    padding: 1rem 1rem 0.95rem 1rem;
-    margin: 0.4rem 0 1rem 0;
-}
-
-.sidebar-brand .eyebrow {
-    text-transform: uppercase;
-    font-size: 0.7rem;
-    letter-spacing: 0.16em;
-    opacity: 0.72;
-    color: var(--sidebar-text-soft);
-}
-
-.sidebar-brand .title {
+/* ── Top Navigation Bar ───────────────────────────────────────────── */
+.topnav-brand {
     font-family: 'Space Grotesk', sans-serif;
-    font-size: 1.2rem;
+    font-size: 1.05rem;
     font-weight: 700;
-    margin-top: 0.4rem;
-    color: var(--sidebar-text);
+    color: var(--cmac-navy);
+    letter-spacing: 0.01em;
+    padding: 0.5rem 0;
+    white-space: nowrap;
+}
+.topnav-divider {
+    height: 1px;
+    background: var(--line);
+    margin: 0.5rem 0 1.5rem 0;
+}
+/* Style all page_link elements in the top nav row */
+[data-testid='stPageLink'] a,
+[data-testid='stPageLink-NavLink'] {
+    display: block !important;
+    text-align: center !important;
+    background: transparent !important;
+    border: 1px solid var(--line) !important;
+    border-radius: var(--radius) !important;
+    padding: 0.4rem 0.5rem !important;
+    color: var(--ink-soft) !important;
+    font-size: 0.83rem !important;
+    font-weight: 500 !important;
+    text-decoration: none !important;
+    transition: all 0.15s ease !important;
+    white-space: nowrap !important;
+}
+[data-testid='stPageLink'] a:hover,
+[data-testid='stPageLink-NavLink']:hover {
+    background: var(--accent-soft) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+}
+[data-testid='stPageLink-NavLink'][aria-current='page'],
+[data-testid='stPageLink'] a[aria-current='page'] {
+    background: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
 }
 
-.sidebar-brand .copy {
-    font-size: 0.86rem;
-    line-height: 1.45;
-    opacity: 0.82;
-    margin-top: 0.45rem;
-    color: var(--sidebar-text);
-}
-
-.page-shell {
-    margin-bottom: 1rem;
-}
-
+/* ── Page Header ─────────────────────────────────────────────────── */
+.page-shell { margin-bottom: 1.25rem; }
 .page-header {
     display: flex;
     justify-content: space-between;
     gap: 1rem;
     align-items: flex-start;
-    background: linear-gradient(135deg, rgba(255,252,247,0.98), rgba(247,239,226,0.94));
-    border: 1px solid var(--line-strong);
-    border-radius: 24px;
-    padding: 1.4rem 1.5rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: var(--radius-xl);
+    padding: 1.3rem 1.6rem;
     box-shadow: var(--shadow);
 }
-
 .page-kicker {
-    text-transform: uppercase;
-    letter-spacing: 0.18em;
-    font-size: 0.72rem;
-    color: var(--muted);
-    margin-bottom: 0.5rem;
-}
-
-.ph-title {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 2rem;
-    line-height: 1.05;
-    color: var(--ink);
-}
-
-.ph-sub {
-    font-size: 0.98rem;
-    color: var(--muted);
-    line-height: 1.55;
-    max-width: 70rem;
-    margin-top: 0.45rem;
-}
-
-.page-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.5rem 0.75rem;
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-weight: 700;
-    white-space: nowrap;
-}
-
-.empty-state {
-    text-align: center;
-    padding: 3.25rem 1rem;
-    background: var(--surface);
-    border: 1px dashed var(--line-strong);
-    border-radius: 22px;
-}
-
-.empty-icon {
-    font-size: 2.8rem;
-}
-
-.empty-title {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 1.1rem;
-    margin-top: 0.5rem;
-}
-
-.empty-copy {
-    color: var(--muted);
-    margin-top: 0.35rem;
-}
-
-.hero-grid {
-    display: grid;
-    grid-template-columns: 1.6fr 1fr;
-    gap: 1rem;
-    margin-top: 0.35rem;
-}
-
-.hero-panel,
-.insight-card {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 22px;
-    box-shadow: var(--shadow);
-}
-
-.hero-panel {
-    padding: 1.4rem 1.5rem;
-}
-
-.hero-title {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 2.2rem;
-    line-height: 1.02;
-    max-width: 20ch;
-}
-
-.hero-copy {
-    color: var(--muted);
-    line-height: 1.6;
-    margin-top: 0.8rem;
-}
-
-.hero-points {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
-    margin-top: 1rem;
-}
-
-.hero-point {
-    padding: 0.9rem 1rem;
-    border-radius: 18px;
-    background: rgba(255,255,255,0.64);
-    border: 1px solid rgba(23, 49, 62, 0.08);
-}
-
-.hero-point strong {
-    display: block;
-    font-size: 0.9rem;
-}
-
-.hero-point span {
-    display: block;
-    margin-top: 0.25rem;
-    color: var(--muted);
-    font-size: 0.82rem;
-}
-
-.insight-card {
-    padding: 1.2rem;
-}
-
-.insight-card h4 {
-    font-family: 'Space Grotesk', sans-serif;
-    margin: 0;
-    font-size: 1.02rem;
-}
-
-.insight-card p {
-    color: var(--muted);
-    line-height: 1.55;
-    margin: 0.55rem 0 0 0;
-}
-
-.tool-card {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    padding: 1rem;
-    min-height: 11.5rem;
-    box-shadow: var(--shadow-soft);
-}
-
-.tool-card .tool-kicker {
-    color: var(--accent);
     text-transform: uppercase;
     letter-spacing: 0.16em;
     font-size: 0.68rem;
-    font-weight: 700;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 0.4rem;
 }
-
-.tool-card h4 {
+.ph-title {
     font-family: 'Space Grotesk', sans-serif;
-    margin: 0.35rem 0;
-    font-size: 1rem;
-}
-
-.tool-card p {
-    color: var(--muted);
-    font-size: 0.88rem;
-    line-height: 1.5;
-}
-
-.tool-card .tool-foot {
-    display: inline-flex;
-    margin-top: 0.8rem;
-    padding: 0.35rem 0.6rem;
-    background: var(--signal-soft);
-    color: var(--signal);
-    border-radius: 999px;
-    font-size: 0.74rem;
+    font-size: 1.75rem;
+    line-height: 1.1;
+    color: var(--ink);
     font-weight: 700;
 }
+.ph-sub {
+    font-size: 0.92rem;
+    color: var(--muted);
+    line-height: 1.6;
+    max-width: 72rem;
+    margin-top: 0.4rem;
+}
+.page-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 0.75rem;
+    border-radius: var(--radius-pill);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.78rem;
+    border: 1px solid rgba(0, 113, 206, 0.2);
+    white-space: nowrap;
+}
 
-[data-testid='stMetric'] {
-    background: var(--surface) !important;
+/* ── Empty State ──────────────────────────────────────────────────── */
+.empty-state {
+    text-align: center;
+    padding: 3.5rem 1rem;
+    background: var(--surface-tint);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius-xl);
+}
+.empty-icon  { font-size: 2.5rem; }
+.empty-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 0.5rem;
+    color: var(--ink-soft);
+}
+.empty-copy  { color: var(--muted); margin-top: 0.3rem; font-size: 0.88rem; }
+
+/* ── Hero Cards (home page) ───────────────────────────────────────── */
+.hero-panel {
+    background: var(--surface);
     border: 1px solid var(--line);
-    border-radius: 20px;
-    padding: 1rem 1.1rem !important;
+    border-radius: var(--radius-xl);
+    padding: 1.6rem;
     box-shadow: var(--shadow);
 }
-
-[data-testid='stMetricLabel'] {
-    color: var(--muted) !important;
+.hero-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.85rem;
+    line-height: 1.1;
+    color: var(--ink);
+    font-weight: 700;
+    max-width: 22ch;
+}
+.hero-copy {
+    color: var(--muted);
+    line-height: 1.65;
+    margin-top: 0.8rem;
+    font-size: 0.95rem;
+}
+.hero-points {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin-top: 1.1rem;
+}
+.hero-point {
+    padding: 0.85rem 1rem;
+    border-radius: var(--radius-lg);
+    background: var(--cmac-blue-light);
+    border: 1px solid var(--cmac-blue-mid);
+}
+.hero-point strong {
+    display: block;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--cmac-navy);
+}
+.hero-point span {
+    display: block;
+    margin-top: 0.2rem;
+    color: var(--muted);
+    font-size: 0.80rem;
 }
 
-[data-testid='stMetricValue'] {
-    color: var(--ink) !important;
+/* ── Tool Cards ───────────────────────────────────────────────────── */
+.tool-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--accent);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.1rem;
+    min-height: 12rem;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s ease;
+}
+.tool-card:hover { box-shadow: var(--shadow-md); }
+.tool-card .tool-kicker {
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.66rem;
+    font-weight: 700;
+}
+.tool-card h4 {
+    font-family: 'Space Grotesk', sans-serif;
+    margin: 0.3rem 0 0.4rem 0;
+    font-size: 0.97rem;
+    color: var(--ink);
+}
+.tool-card p {
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin: 0;
+}
+.tool-card .tool-foot {
+    display: inline-flex;
+    margin-top: 0.75rem;
+    padding: 0.28rem 0.6rem;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: var(--radius-pill);
+    font-size: 0.72rem;
+    font-weight: 700;
+    border: 1px solid rgba(0,113,206,0.15);
 }
 
+/* ── Metric Cards ─────────────────────────────────────────────────── */
+[data-testid='stMetric'] {
+    background: var(--surface) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: var(--radius-lg) !important;
+    padding: 1.1rem 1.3rem !important;
+    box-shadow: var(--shadow-sm) !important;
+}
+[data-testid='stMetricLabel']  { color: var(--muted) !important; font-size: 0.80rem !important; }
+[data-testid='stMetricValue']  { color: var(--ink) !important; font-weight: 700 !important; }
+[data-testid='stMetricDelta']  { font-size: 0.80rem !important; }
+
+/* ── Text / Markdown ──────────────────────────────────────────────── */
 [data-testid='stMarkdownContainer'],
 [data-testid='stText'],
 [data-testid='stCaptionContainer'],
@@ -382,133 +315,79 @@ p, li, label, .stMarkdown, .stCaption, .stText, .stAlert {
 [data-testid='stNotificationContentInfo'],
 [data-testid='stNotificationContentWarning'],
 [data-testid='stNotificationContentError'],
-[data-testid='stNotificationContentSuccess'] {
-    color: var(--ink);
-}
+[data-testid='stNotificationContentSuccess'] { color: var(--ink); }
 
 [data-testid='stMarkdownContainer'] p,
 [data-testid='stMarkdownContainer'] li,
 [data-testid='stMarkdownContainer'] span,
-[data-testid='stMarkdownContainer'] div,
-[data-testid='stCaptionContainer'] p {
-    color: inherit;
-}
+[data-testid='stCaptionContainer'] p { color: inherit; }
 
+/* ── Tables / DataFrames ──────────────────────────────────────────── */
 [data-testid='stDataFrame'], [data-testid='stTable'] {
     background: var(--surface);
-    border-radius: 20px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--line);
+    overflow: hidden;
 }
+[data-testid='stDataFrame'] *, [data-testid='stTable'] * { color: var(--ink) !important; }
+[data-testid='stDataEditor'] { border-radius: var(--radius-lg); overflow: hidden; }
+[data-testid='stDataEditor'] * { color: var(--ink) !important; }
 
-[data-testid='stDataFrame'] * ,
-[data-testid='stTable'] * {
-    color: var(--ink) !important;
-}
-
+/* ── Tabs ─────────────────────────────────────────────────────────── */
 [data-testid='stTabs'] [data-baseweb='tab-list'] {
-    gap: 0.25rem;
+    gap: 0.2rem;
+    background: var(--surface-tint);
+    border-radius: var(--radius-pill);
+    padding: 0.2rem;
+    border: 1px solid var(--line);
+    width: fit-content;
 }
-
 [data-testid='stTabs'] [data-baseweb='tab'] {
-    background: rgba(255,255,255,0.55);
-    border-radius: 999px;
-    border: 1px solid rgba(23,49,62,0.08);
-    height: 2.4rem;
-    padding: 0 1rem;
-    color: var(--ink-soft);
+    background: transparent;
+    border-radius: var(--radius-pill);
+    border: none;
+    padding: 0.4rem 1rem;
+    color: var(--muted);
+    font-size: 0.86rem;
+    font-weight: 500;
+    white-space: nowrap;
 }
-
 [data-testid='stTabs'] [aria-selected='true'] {
-    background: var(--accent-soft) !important;
-    color: var(--accent) !important;
+    background: var(--accent) !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
 }
+[data-testid='stTabs'] [data-baseweb='tab-highlight'] { display: none !important; }
+[data-testid='stTabs'] [data-baseweb='tab-border']    { display: none !important; }
 
-[data-testid='stTabs'] [data-baseweb='tab-highlight'] {
-    background: transparent !important;
-}
-
+/* ── Inputs ───────────────────────────────────────────────────────── */
 [data-baseweb='input'],
 [data-baseweb='select'] > div,
 textarea,
 [data-baseweb='textarea'] {
-    background: var(--surface-strong) !important;
+    background: var(--surface) !important;
     color: var(--ink) !important;
     border-color: var(--line-strong) !important;
-    border-radius: 16px !important;
+    border-radius: var(--radius) !important;
 }
-
 input, textarea {
     color: var(--ink) !important;
     -webkit-text-fill-color: var(--ink) !important;
 }
-
-input::placeholder,
-textarea::placeholder {
+input::placeholder, textarea::placeholder {
     color: var(--muted) !important;
     -webkit-text-fill-color: var(--muted) !important;
 }
-
-[data-baseweb='select'] input {
-    color: var(--ink) !important;
-}
-
+[data-baseweb='select'] input { color: var(--ink) !important; }
 [data-baseweb='tag'] {
     background: var(--accent-soft) !important;
-    border-radius: 999px !important;
-    border: 1px solid rgba(11, 110, 105, 0.14) !important;
+    border-radius: var(--radius-pill) !important;
+    border: 1px solid rgba(0, 113, 206, 0.18) !important;
 }
+[data-baseweb='tag'] span { color: var(--accent-strong) !important; }
 
-[data-baseweb='tag'] span {
-    color: var(--accent-strong) !important;
-}
-
-label, .st-bq, .st-bs, .st-bt, .st-bu {
-    color: var(--ink) !important;
-}
-
-[data-testid='stNumberInput'] button,
-[data-testid='stDateInput'] button,
-[data-testid='stSelectbox'] button,
-[data-testid='baseButton-secondary'],
-[data-testid='baseButton-headerNoPadding'] {
-    color: var(--ink) !important;
-}
-
-.stButton > button,
-[data-testid='stDownloadButton'] > button {
-    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
-    color: #f7f4ee !important;
-    border: 0;
-    border-radius: 14px;
-    padding: 0.62rem 1rem;
-    font-weight: 700;
-    box-shadow: 0 10px 22px rgba(11, 110, 105, 0.18);
-}
-
-.stButton > button:hover,
-[data-testid='stDownloadButton'] > button:hover {
-    background: linear-gradient(135deg, #0d7d77 0%, #08615c 100%);
-}
-
-[data-testid='stForm'] {
-    background: rgba(255, 250, 241, 0.7);
-    border-radius: 22px;
-}
-
-[data-testid='stAlert'] {
-    border-radius: 18px;
-    border: 1px solid var(--line);
-}
-
-[data-testid='stAlert'] * {
-    color: var(--ink) !important;
-}
-
-[data-testid='stExpander'] {
-    background: rgba(255, 250, 241, 0.52);
-    border: 1px solid var(--line);
-    border-radius: 18px;
-}
-
+/* ── Labels ───────────────────────────────────────────────────────── */
+label, .st-bq, .st-bs, .st-bt, .st-bu { color: var(--ink) !important; }
 [data-testid='stCheckbox'] label,
 [data-testid='stRadio'] label,
 [data-testid='stToggle'] label,
@@ -517,35 +396,82 @@ label, .st-bq, .st-bs, .st-bt, .st-bu {
 [data-testid='stSelectbox'] label,
 [data-testid='stTextInput'] label,
 [data-testid='stNumberInput'] label,
-[data-testid='stTextArea'] label {
-    color: var(--ink) !important;
+[data-testid='stTextArea'] label { color: var(--ink) !important; font-weight: 600; font-size: 0.85rem; }
+
+/* ── Buttons ──────────────────────────────────────────────────────── */
+.stButton > button,
+[data-testid='stDownloadButton'] > button {
+    background: var(--accent);
+    color: #ffffff !important;
+    border: none;
+    border-radius: var(--radius);
+    padding: 0.55rem 1rem;
     font-weight: 600;
+    font-size: 0.88rem;
+    box-shadow: 0 3px 12px rgba(0, 113, 206, 0.22);
+    transition: all 0.18s ease;
+}
+.stButton > button:hover,
+[data-testid='stDownloadButton'] > button:hover {
+    background: var(--accent-strong);
+    box-shadow: 0 5px 18px rgba(0, 113, 206, 0.32);
+    transform: translateY(-1px);
+}
+[data-testid='stNumberInput'] button,
+[data-testid='stDateInput'] button,
+[data-testid='stSelectbox'] button,
+[data-testid='baseButton-secondary'],
+[data-testid='baseButton-headerNoPadding'] { color: var(--ink) !important; }
+
+/* ── Containers / Expanders ───────────────────────────────────────── */
+[data-testid='stExpander'] {
+    background: var(--surface);
+    border: 1px solid var(--line) !important;
+    border-radius: var(--radius-lg) !important;
+}
+[data-testid='stAlert'] {
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--line);
+}
+[data-testid='stAlert'] * { color: var(--ink) !important; }
+
+/* ── Form Section Labels ──────────────────────────────────────────── */
+.form-section-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+    margin: 0 0 0.25rem 0;
 }
 
-[data-testid='stDataEditor'] {
-    border-radius: 18px;
-    overflow: hidden;
+/* ── Role Badges (Smart Formulation Builder) ──────────────────────── */
+.role-pill {
+    display: inline-block;
+    padding: 0.22rem 0.65rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 0.55rem;
 }
+.role-api      { background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(0,113,206,0.20); }
+.role-disint   { background: rgba(27,122,62,0.10); color: #1B7A3E; border: 1px solid rgba(27,122,62,0.20); }
+.role-lubricant{ background: rgba(154,107,0,0.10); color: #9A6B00; border: 1px solid rgba(154,107,0,0.20); }
+.role-filler   { background: rgba(74,106,138,0.10); color: #4A6A8A; border: 1px solid rgba(74,106,138,0.20); }
 
-[data-testid='stDataEditor'] * {
-    color: var(--ink) !important;
-}
-
+/* ── Code ─────────────────────────────────────────────────────────── */
 [data-testid='stMarkdownContainer'] code {
-    background: rgba(23,49,62,0.06);
-    color: var(--ink);
+    background: var(--cmac-blue-light);
+    color: var(--accent-strong);
+    border-radius: 4px;
+    padding: 0.1rem 0.35rem;
 }
 
-@media (max-width: 980px) {
-    .hero-grid {
-        grid-template-columns: 1fr;
-    }
-    .hero-points {
-        grid-template-columns: 1fr;
-    }
-    .page-header {
-        flex-direction: column;
-    }
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 960px) {
+    .hero-points { grid-template-columns: 1fr; }
+    .page-header { flex-direction: column; }
 }
 </style>
 """,
@@ -559,8 +485,8 @@ def _home() -> None:
     options = api_state.get("options", {})
 
     render_page_header(
-        "Blend and tablet property prediction",
-        "Use the DM2 System-of-Models backend to simulate blend flowability, tablet porosity, tensile strength, compressibility profiles, optimisation studies, and parameter sweeps from one connected workspace.",
+        "Blend & Tablet Property Prediction",
+        "DM² System-of-Models — simulate blend flowability, tablet porosity, tensile strength, and compressibility profiles, or run in-silico formulation optimisation and design-space sensitivity analysis.",
         badge=contract.get("version", "API offline"),
     )
 
@@ -569,14 +495,14 @@ def _home() -> None:
         st.markdown(
             """
 <div class='hero-panel'>
-  <div class='hero-title'>Model-led formulation analysis without local dashboard hardcoding.</div>
+  <div class='hero-title'>Predictive modelling &amp; simulation for pharmaceutical formulation.</div>
   <div class='hero-copy'>
-    The dashboard now reads its live contract from the FastAPI backend, aligns its forms to the published optimisation options, and keeps the scientific outputs focused on what the backend actually returns.
+    Connect to the DM² backend to access physics-informed and data-driven models for direct-compression tablet development. All results are driven live from the API — no hardcoded data.
   </div>
   <div class='hero-points'>
-    <div class='hero-point'><strong>Single-point simulation</strong><span>Blend and tablet properties at one compaction pressure.</span></div>
+    <div class='hero-point'><strong>Single-point simulation</strong><span>Blend &amp; tablet properties at one compaction pressure.</span></div>
     <div class='hero-point'><strong>Empirical profiles</strong><span>Kawakita and Duckworth analysis across a pressure range.</span></div>
-    <div class='hero-point'><strong>Optimisation and sensitivity</strong><span>Solver-driven formulation search and design-space mapping.</span></div>
+    <div class='hero-point'><strong>Optimisation &amp; sensitivity</strong><span>Solver-driven formulation search and design-space mapping.</span></div>
   </div>
 </div>
 """,
@@ -603,28 +529,28 @@ def _home() -> None:
 
     if not api_state["ok"]:
         st.info(
-            "The backend Dockerfile and entrypoint in the sibling DM2-System-of-Models project expose port 8080. If you are running the API locally, prefer an API base URL ending in 8080 unless your deployment explicitly remaps the port."
+            "The backend Dockerfile and entrypoint in the sibling DM2-System-of-Models project expose port 8080. "
+            "If you are running the API locally, use an API base URL ending in 8080 unless your deployment remaps the port."
         )
         st.stop()
 
     catalog = get_component_catalog(options)
-    materials_count = len(catalog)
     paths = contract.get("path_map", {})
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("API paths", len(contract.get("paths", [])))
-    m2.metric("Materials exposed", materials_count)
+    m2.metric("Materials", len(catalog))
     m3.metric("Objectives", len(options.get("available_objectives", [])))
     m4.metric("Constraints", len(options.get("available_constraints", [])))
 
     st.markdown("### Study modes")
     tool_cols = st.columns(5, gap="medium")
     tool_cards = [
-        ("Simulation", "Single Run", "Predict granular and tablet properties at one compaction pressure using the shared single-run backend endpoint.", "/single_run"),
+        ("Simulation", "Single Run", "Predict blend and tablet properties at one compaction pressure using the shared backend endpoint.", "/single_run"),
         ("Simulation", "Multiple Run", "Fit compressibility and tensile profiles over a compaction-pressure range using the empirical profile endpoint.", "/multiple_run"),
-        ("Optimisation", "Digital Formulator", "Query backend objectives, constraints, and defaults, then run formulation optimisation with the published solver settings.", "/digital_formulator"),
+        ("Optimisation", "Digital Formulator", "Configure objectives, constraints, and search space, then run in-silico formulation optimisation.", "/digital_formulator"),
         ("Comparison", "Formulation Comparison", "Run several candidate blends through the same single-run model and compare responses side by side.", "/single_run"),
-        ("Analysis", "Sensitivity Analysis", "Sweep one fraction or compaction pressure and observe design-space trends in flowability and tablet properties.", "/single_run"),
+        ("Analysis", "Sensitivity Analysis", "Sweep one fraction or compaction pressure and observe design-space trends.", "/single_run"),
     ]
     for col, (kicker, title, copy, endpoint) in zip(tool_cols, tool_cards):
         status = "Live" if endpoint in paths else "Not published"
@@ -641,7 +567,7 @@ def _home() -> None:
                 unsafe_allow_html=True,
             )
 
-    st.markdown("### API surface and reference data")
+    st.markdown("### API surface &amp; reference data")
     tab_materials, tab_endpoints, tab_defaults = st.tabs(["Materials", "Endpoints", "Optimisation defaults"])
 
     with tab_materials:
@@ -649,7 +575,7 @@ def _home() -> None:
             st.info("The options endpoint did not return material metadata.")
         else:
             role_counts = catalog.groupby("Role").size().reset_index(name="Count")
-            left, right = st.columns([1, 2], gap="large")
+            left, right = st.columns([1, 2.5], gap="large")
             with left:
                 st.dataframe(role_counts, use_container_width=True, hide_index=True)
             with right:
@@ -659,14 +585,12 @@ def _home() -> None:
         endpoint_rows = []
         for path, methods in paths.items():
             for method_name, info in methods.items():
-                endpoint_rows.append(
-                    {
-                        "Method": method_name.upper(),
-                        "Path": path,
-                        "Summary": info.get("summary", ""),
-                    }
-                )
-        endpoint_df = pd.DataFrame(endpoint_rows).sort_values(["Path", "Method"]) if endpoint_rows else pd.DataFrame()
+                endpoint_rows.append({"Method": method_name.upper(), "Path": path, "Summary": info.get("summary", "")})
+        endpoint_df = (
+            pd.DataFrame(endpoint_rows).sort_values(["Path", "Method"])
+            if endpoint_rows
+            else pd.DataFrame()
+        )
         st.dataframe(endpoint_df, use_container_width=True, hide_index=True)
 
     with tab_defaults:
@@ -675,9 +599,7 @@ def _home() -> None:
             left, right = st.columns(2, gap="large")
             with left:
                 st.dataframe(
-                    pd.DataFrame(
-                        [{"Setting": key, "Value": str(value)} for key, value in defaults.items() if key != "constraints"]
-                    ),
+                    pd.DataFrame([{"Setting": k, "Value": str(v)} for k, v in defaults.items() if k != "constraints"]),
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -687,26 +609,6 @@ def _home() -> None:
                     st.dataframe(pd.DataFrame(constraint_defaults), use_container_width=True, hide_index=True)
         else:
             st.info("No optimisation defaults were returned by the backend.")
-
-
-with st.sidebar:
-    st.markdown(
-        """
-<div class='sidebar-brand'>
-  <div class='eyebrow'>University of Strathclyde · CMAC</div>
-  <div class='title'>Digital Formulator</div>
-  <div class='copy'>A Streamlit front end for the DM2 System-of-Models API, oriented around scientific analysis of blends, compaction, and tablet performance.</div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    sidebar_state = refresh_api_state()
-    if sidebar_state["ok"]:
-        st.caption("Connected backend")
-        st.write(sidebar_state["contract"].get("base_url", "Unavailable"))
-    else:
-        st.caption("Backend status")
-        st.write("Offline")
 
 
 navigation = st.navigation(
@@ -719,10 +621,13 @@ navigation = st.navigation(
             st.Page("pages/2_Multiple_Run.py", title="Multiple Run", icon="📈"),
         ],
         "Optimisation and analysis": [
-            st.Page("pages/3_Digital_Formulator.py", title="Digital Formulator", icon="🧭"),
+            st.Page("pages/3_Digital_Formulator.py", title="Digital Formulator", icon="🧬"),
             st.Page("pages/4_Formulation_Comparison.py", title="Comparison", icon="⚗️"),
             st.Page("pages/5_Sensitivity_Analysis.py", title="Sensitivity", icon="📐"),
         ],
-    }
+    },
+    position="hidden",
 )
+
+render_top_nav()
 navigation.run()

@@ -74,14 +74,41 @@ _BUILTIN_API_IDS: frozenset[str] = frozenset(
     {"as1", "as2", "dm1", "ib1", "ib2", "ib6", "rp1", "sh1", "sh2", "caf"}
 )
 
+# Disintegrants: CCS (croscarmellose sodium) and grades
+_BUILTIN_DISINTEGRANT_IDS: frozenset[str] = frozenset({"cc1", "cc2", "cc3", "cc4", "cc5"})
+
+# Lubricants: Magnesium stearate and grades
+_BUILTIN_LUBRICANT_IDS: frozenset[str] = frozenset({"ms1", "ms2", "ms4", "ms5"})
+
+# Filler / bulk excipient prefixes
+_FILLER_PREFIXES: frozenset[str] = frozenset({"la", "ma", "mc", "dc", "sp", "gr"})
+
+# Fallback objectives and constraints when the backend does not expose them
+_BUILTIN_OBJECTIVES: List[str] = [
+    "maximize_ffc",
+    "maximize_tensile_mean",
+    "minimize_true_density",
+    "maximize_porosity_mean",
+    "minimize_eaoif",
+]
+
+_BUILTIN_CONSTRAINTS: List[str] = [
+    "tensile_strength_min",
+    "tensile_mean_min",
+    "ffc_min",
+    "eaoif_max",
+    "porosity_min",
+    "porosity_minus_std_min",
+]
+
 _DEFAULT_FALLBACK_OPTIONS: Dict[str, Any] = {
     "available_components": sorted(_BUILTIN_COMPONENT_LABELS.keys()),
     "available_apis": sorted(_BUILTIN_API_IDS),
     "available_excipients": sorted(
         component_id for component_id in _BUILTIN_COMPONENT_LABELS if component_id not in _BUILTIN_API_IDS
     ),
-    "available_objectives": [],
-    "available_constraints": [],
+    "available_objectives": list(_BUILTIN_OBJECTIVES),
+    "available_constraints": list(_BUILTIN_CONSTRAINTS),
     "component_names": dict(_BUILTIN_COMPONENT_LABELS),
     "current_defaults": {},
     "options_degraded": True,
@@ -345,8 +372,8 @@ def _normalise_options(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "available_components": available_components,
         "available_apis": [cid for cid in available_apis if cid in available_components] if available_components else available_apis,
         "available_excipients": available_excipients,
-        "available_objectives": _coerce_string_list(data.get("available_objectives")),
-        "available_constraints": _coerce_string_list(data.get("available_constraints")),
+        "available_objectives": _coerce_string_list(data.get("available_objectives")) or list(_BUILTIN_OBJECTIVES),
+        "available_constraints": _coerce_string_list(data.get("available_constraints")) or list(_BUILTIN_CONSTRAINTS),
         "component_names": {str(key): str(value) for key, value in component_names.items()},
         "current_defaults": current_defaults,
         "options_degraded": bool(data.get("options_degraded", False)),
@@ -399,6 +426,38 @@ def component_short_name(cid: str) -> str:
 
 def is_api(cid: str, options: Optional[Dict[str, Any]] = None) -> bool:
     return cid in set((options or _LAST_OPTIONS).get("available_apis", []))
+
+
+def is_disintegrant(cid: str) -> bool:
+    """True if the component is a CCS disintegrant or a registered disintegrant grade."""
+    return cid in _BUILTIN_DISINTEGRANT_IDS or cid.startswith("cc")
+
+
+def is_lubricant(cid: str) -> bool:
+    """True if the component is a magnesium stearate lubricant or grade."""
+    return cid in _BUILTIN_LUBRICANT_IDS or cid.startswith("ms")
+
+
+def is_filler(cid: str, options: Optional[Dict[str, Any]] = None) -> bool:
+    """True if the component is a bulk filler/excipient (not API, disintegrant or lubricant)."""
+    if is_api(cid, options) or is_disintegrant(cid) or is_lubricant(cid):
+        return False
+    return True
+
+
+def get_disintegrant_choices(options: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Return all disintegrant CIDs available in the current options."""
+    return [cid for cid in get_component_choices(options) if is_disintegrant(cid)]
+
+
+def get_lubricant_choices(options: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Return all lubricant CIDs available in the current options."""
+    return [cid for cid in get_component_choices(options) if is_lubricant(cid)]
+
+
+def get_filler_choices(options: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Return all bulk filler/excipient CIDs (not API, disintegrant or lubricant)."""
+    return [cid for cid in get_component_choices(options) if is_filler(cid, options)]
 
 
 def get_component_choices(options: Optional[Dict[str, Any]] = None) -> List[str]:

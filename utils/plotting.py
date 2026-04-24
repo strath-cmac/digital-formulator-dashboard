@@ -513,3 +513,31 @@ def sensitivity_band_figure(
         **_BASE_LAYOUT,
     )
     return fig
+
+
+def sensitivity_figure(
+    x_values: List[float],
+    y_values: List[float],
+    x_label: str = "Sweep parameter",
+    y_label: str = "KPI",
+    color: str = _BLUE,
+) -> go.Figure:
+    """Simple line+markers sweep chart for a single KPI."""
+    fig = go.Figure(
+        go.Scatter(
+            x=x_values,
+            y=y_values,
+            mode="lines+markers",
+            line=dict(color=color, width=2.5),
+            marker=dict(size=7),
+            name=y_label,
+        )
+    )
+    fig.update_layout(
+        xaxis_title=x_label,
+        yaxis_title=y_label,
+        title=f"{y_label} vs {x_label}",
+        height=320,
+        **_BASE_LAYOUT,
+    )
+    return fig
