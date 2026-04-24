@@ -29,23 +29,29 @@ class FormulationPayload:
     total_fraction: float
 
 
-def render_top_nav() -> None:
-    """Render a horizontal top navigation bar using Streamlit page_link elements."""
+def render_top_nav(pages: Optional[Dict[str, Any]] = None) -> None:
+    """Render a horizontal top navigation bar using Streamlit page_link elements.
+
+    Pass the ``pages`` dict returned by :func:`make_nav_pages` so that
+    ``st.page_link`` receives ``st.Page`` objects (required when the home
+    page is backed by a callable rather than a file path).
+    """
+    p = pages or {}
     c0, c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.9, 0.9, 1.0, 1.5, 1.3, 1.2])
     with c0:
         st.markdown("<div class='topnav-brand'>🧬 DM² Formulator</div>", unsafe_allow_html=True)
     with c1:
-        st.page_link("app.py", label="Home", use_container_width=True)
+        st.page_link(p.get("home", "app.py"), label="Home", use_container_width=True)
     with c2:
-        st.page_link("pages/1_Single_Run.py", label="Single Run", use_container_width=True)
+        st.page_link(p.get("single_run", "pages/1_Single_Run.py"), label="Single Run", use_container_width=True)
     with c3:
-        st.page_link("pages/2_Multiple_Run.py", label="Multi-Run", use_container_width=True)
+        st.page_link(p.get("multiple_run", "pages/2_Multiple_Run.py"), label="Multi-Run", use_container_width=True)
     with c4:
-        st.page_link("pages/3_Digital_Formulator.py", label="Digital Formulator", use_container_width=True)
+        st.page_link(p.get("digital_formulator", "pages/3_Digital_Formulator.py"), label="Digital Formulator", use_container_width=True)
     with c5:
-        st.page_link("pages/4_Formulation_Comparison.py", label="Comparison", use_container_width=True)
+        st.page_link(p.get("comparison", "pages/4_Formulation_Comparison.py"), label="Comparison", use_container_width=True)
     with c6:
-        st.page_link("pages/5_Sensitivity_Analysis.py", label="Sensitivity", use_container_width=True)
+        st.page_link(p.get("sensitivity", "pages/5_Sensitivity_Analysis.py"), label="Sensitivity", use_container_width=True)
     st.markdown("<div class='topnav-divider'></div>", unsafe_allow_html=True)
 
 

@@ -611,23 +611,28 @@ def _home() -> None:
             st.info("No optimisation defaults were returned by the backend.")
 
 
+_pg_home   = st.Page(_home, title="Home", icon="🏠", default=True)
+_pg_sr     = st.Page("pages/1_Single_Run.py", title="Single Run", icon="🔬")
+_pg_mr     = st.Page("pages/2_Multiple_Run.py", title="Multiple Run", icon="📈")
+_pg_df     = st.Page("pages/3_Digital_Formulator.py", title="Digital Formulator", icon="🧬")
+_pg_cmp    = st.Page("pages/4_Formulation_Comparison.py", title="Comparison", icon="⚗️")
+_pg_sa     = st.Page("pages/5_Sensitivity_Analysis.py", title="Sensitivity", icon="📐")
+
 navigation = st.navigation(
     {
-        "Home": [
-            st.Page(_home, title="Home", icon="🏠", default=True),
-        ],
-        "Simulation": [
-            st.Page("pages/1_Single_Run.py", title="Single Run", icon="🔬"),
-            st.Page("pages/2_Multiple_Run.py", title="Multiple Run", icon="📈"),
-        ],
-        "Optimisation and analysis": [
-            st.Page("pages/3_Digital_Formulator.py", title="Digital Formulator", icon="🧬"),
-            st.Page("pages/4_Formulation_Comparison.py", title="Comparison", icon="⚗️"),
-            st.Page("pages/5_Sensitivity_Analysis.py", title="Sensitivity", icon="📐"),
-        ],
+        "Home": [_pg_home],
+        "Simulation": [_pg_sr, _pg_mr],
+        "Optimisation and analysis": [_pg_df, _pg_cmp, _pg_sa],
     },
     position="hidden",
 )
 
-render_top_nav()
+render_top_nav({
+    "home":              _pg_home,
+    "single_run":        _pg_sr,
+    "multiple_run":      _pg_mr,
+    "digital_formulator": _pg_df,
+    "comparison":        _pg_cmp,
+    "sensitivity":       _pg_sa,
+})
 navigation.run()
