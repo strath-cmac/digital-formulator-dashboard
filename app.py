@@ -7,7 +7,7 @@ from utils.dashboard import get_component_catalog, refresh_api_state, render_pag
 
 
 st.set_page_config(
-    page_title="DM² Digital Formulator",
+    page_title="Digital Formulator",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="collapsed",
