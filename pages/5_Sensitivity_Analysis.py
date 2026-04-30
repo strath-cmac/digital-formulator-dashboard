@@ -41,10 +41,11 @@ if not label_to_id:
     st.stop()
 
 render_page_header(
-    "Sensitivity Analysis",
-    "Sweep one input variable (a component fraction or the compaction pressure) across a "
-    "defined range and observe how key performance indicators respond.",
-    badge="/single_run",
+    "Design-Space Sensitivity Analysis",
+    "Systematically vary one input \u2014 an excipient fraction or the compaction pressure \u2014 "
+    "across a defined range while holding all other parameters fixed. Observe how FFC, "
+    "tensile strength, porosity, and other KPIs respond to understand formulation "
+    "robustness and identify critical process parameters.",
 )
 
 config_col, result_col = st.columns([1.15, 1.6], gap="large")
@@ -177,8 +178,24 @@ with result_col:
     sweep_df = pd.DataFrame(rows)
 
     x_vals = [item["sweep_value"] for item in sweep_results]
+    _KPI_DESCRIPTIONS = {
+        "FFC":           "Flow Function Coefficient — higher is more flowable",
+        "EAOIF":         "Effective Angle of Internal Friction (\u00b0) — lower is better for hopper flow",
+        "Porosity mean": "Mean tablet porosity at specified compaction pressure",
+        "Porosity std":  "Prediction uncertainty on porosity",
+        "Tensile mean":  "Mean diametral tensile strength (MPa) — target \u2265 2 MPa",
+        "Tensile std":   "Prediction uncertainty on tensile strength",
+        "True density":  "Blend true density (g/cm\u00b3)",
+        "Carr's index":  "Compressibility index (%) — < 15\u202f% excellent flow",
+        "Hausner ratio": "Tapped/bulk density ratio — < 1.25 good flow",
+    }
     kpi_options = [c for c in sweep_df.columns if c != saved_x_label]
-    selected_kpis = st.multiselect("KPIs to plot", options=kpi_options, default=kpi_options[:4])
+    selected_kpis = st.multiselect(
+        "KPIs to plot",
+        options=kpi_options,
+        default=kpi_options[:4],
+        format_func=lambda k: f"{k} — {_KPI_DESCRIPTIONS.get(k, '')}",
+    )
 
     if selected_kpis:
         for kpi in selected_kpis:

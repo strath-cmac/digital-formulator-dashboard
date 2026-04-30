@@ -26,18 +26,18 @@ st.markdown(
     --cmac-blue-mid:    #D0E8F8;
     --cmac-blue-light:  #EBF5FF;
 
-    --bg:               #EEF4FB;
-    --bg-deep:          #E0EAF5;
+    --bg:               #FFFFFF;
+    --bg-deep:          #F4F8FC;
     --surface:          #FFFFFF;
-    --surface-tint:     #F5F9FF;
+    --surface-tint:     #F5F8FC;
 
     --ink:              #0C1E2E;
     --ink-soft:         #1A3A5C;
     --muted:            #4A6A8A;
     --muted-light:      #7A9BBB;
 
-    --line:             rgba(0, 56, 101, 0.10);
-    --line-strong:      rgba(0, 56, 101, 0.18);
+    --line:             rgba(0, 56, 101, 0.13);
+    --line-strong:      rgba(0, 56, 101, 0.22);
 
     --accent:           #0071CE;
     --accent-strong:    #005A9E;
@@ -70,7 +70,7 @@ body { color: var(--ink); }
 p, li, label, .stMarkdown, .stCaption, .stText, .stAlert { color: var(--ink); }
 
 [data-testid='stAppViewContainer'] {
-    background: linear-gradient(160deg, var(--bg) 0%, #e8f0f9 50%, var(--bg-deep) 100%);
+    background: #FFFFFF;
     min-height: 100vh;
 }
 
@@ -91,6 +91,19 @@ section[data-testid='stSidebarContent'],
     padding-left: 1.5rem;
     padding-right: 1.5rem;
     padding-bottom: 3rem;
+}
+
+/* Containers on white page get a light tint */
+[data-testid='stVerticalBlockBorderWrapper'] > div > div {
+    border-radius: var(--radius-lg) !important;
+}
+
+/* Streamlit bordered containers */
+[data-testid='stVerticalBlockBorderWrapper'] {
+    background: var(--surface-tint) !important;
+    border: 1px solid var(--line-strong) !important;
+    border-radius: var(--radius-lg) !important;
+    box-shadow: var(--shadow-sm) !important;
 }
 
 /* ── Top Navigation Bar ───────────────────────────────────────────── */
@@ -146,11 +159,11 @@ section[data-testid='stSidebarContent'],
     gap: 1rem;
     align-items: flex-start;
     background: var(--surface);
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-strong);
     border-left: 4px solid var(--accent);
     border-radius: var(--radius-xl);
     padding: 1.3rem 1.6rem;
-    box-shadow: var(--shadow);
+    box-shadow: var(--shadow-md);
 }
 .page-kicker {
     text-transform: uppercase;
@@ -208,10 +221,10 @@ section[data-testid='stSidebarContent'],
 /* ── Hero Cards (home page) ───────────────────────────────────────── */
 .hero-panel {
     background: var(--surface);
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-strong);
     border-radius: var(--radius-xl);
     padding: 1.6rem;
-    box-shadow: var(--shadow);
+    box-shadow: var(--shadow-md);
 }
 .hero-title {
     font-family: 'Space Grotesk', sans-serif;
@@ -255,12 +268,12 @@ section[data-testid='stSidebarContent'],
 /* ── Tool Cards ───────────────────────────────────────────────────── */
 .tool-card {
     background: var(--surface);
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-strong);
     border-top: 3px solid var(--accent);
     border-radius: var(--radius-lg);
     padding: 1rem 1.1rem;
     min-height: 12rem;
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--shadow);
     transition: box-shadow 0.2s ease;
 }
 .tool-card:hover { box-shadow: var(--shadow-md); }
@@ -298,10 +311,10 @@ section[data-testid='stSidebarContent'],
 /* ── Metric Cards ─────────────────────────────────────────────────── */
 [data-testid='stMetric'] {
     background: var(--surface) !important;
-    border: 1px solid var(--line) !important;
+    border: 1px solid var(--line-strong) !important;
     border-radius: var(--radius-lg) !important;
     padding: 1.1rem 1.3rem !important;
-    box-shadow: var(--shadow-sm) !important;
+    box-shadow: var(--shadow) !important;
 }
 [data-testid='stMetricLabel']  { color: var(--muted) !important; font-size: 0.80rem !important; }
 [data-testid='stMetricValue']  { color: var(--ink) !important; font-weight: 700 !important; }
@@ -485,24 +498,39 @@ def _home() -> None:
     options = api_state.get("options", {})
 
     render_page_header(
-        "Blend & Tablet Property Prediction",
-        "DM² System-of-Models — simulate blend flowability, tablet porosity, tensile strength, and compressibility profiles, or run in-silico formulation optimisation and design-space sensitivity analysis.",
-        badge=contract.get("version", "API offline"),
+        "Digital Formulator",
+        "An in-silico platform for direct-compression tablet development — predict powder blend "
+        "characterisation, tablet mechanical performance, and compressibility profiles, or run "
+        "physics-informed optimisation to identify candidate formulations meeting your target "
+        "product profile.",
     )
 
-    hero_left, hero_right = st.columns([1.8, 1.1], gap="large")
+    hero_left, hero_right = st.columns([2.2, 0.9], gap="large")
     with hero_left:
         st.markdown(
             """
 <div class='hero-panel'>
-  <div class='hero-title'>Predictive modelling &amp; simulation for pharmaceutical formulation.</div>
+  <div class='hero-title'>Predictive modelling for pharmaceutical formulation scientists.</div>
   <div class='hero-copy'>
-    Connect to the DM² backend to access physics-informed and data-driven models for direct-compression tablet development. All results are driven live from the API — no hardcoded data.
+    The Digital Formulator integrates data-driven and physics-informed models trained on powder
+    characterisation and compaction datasets. From a formulation composition and compaction
+    pressure, the platform predicts blend flowability (FFC, EAOIF, Carr&#8217;s index), particle
+    size and shape distributions, tablet porosity, tensile strength, and empirical compressibility
+    parameters (Kawakita&#8211;Lud&#273;e, Duckworth) — all without a single laboratory experiment.
   </div>
   <div class='hero-points'>
-    <div class='hero-point'><strong>Single-point simulation</strong><span>Blend &amp; tablet properties at one compaction pressure.</span></div>
-    <div class='hero-point'><strong>Empirical profiles</strong><span>Kawakita and Duckworth analysis across a pressure range.</span></div>
-    <div class='hero-point'><strong>Optimisation &amp; sensitivity</strong><span>Solver-driven formulation search and design-space mapping.</span></div>
+    <div class='hero-point'>
+      <strong>Blend characterisation</strong>
+      <span>Flowability (FFC), bulk &amp; tapped density, EAOIF, and particle morphology from composition alone.</span>
+    </div>
+    <div class='hero-point'>
+      <strong>Tablet performance</strong>
+      <span>Porosity and tensile strength profiles across a compaction-pressure range via the Duckworth model.</span>
+    </div>
+    <div class='hero-point'>
+      <strong>Formulation optimisation</strong>
+      <span>Genetic-algorithm search over composition and pressure space to meet user-defined feasibility constraints.</span>
+    </div>
   </div>
 </div>
 """,
@@ -510,50 +538,92 @@ def _home() -> None:
         )
     with hero_right:
         with st.container(border=True):
-            st.caption("Backend connection")
             if api_state["ok"]:
-                st.success(api_state["msg"])
-                st.write(contract.get("base_url", "Unknown base URL"))
+                st.success("Backend connected")
+                base_url = contract.get("base_url", "")
+                if base_url:
+                    st.caption(f"**Endpoint:** `{base_url}`")
+                version = contract.get("version", "")
+                if version:
+                    st.caption(f"**Version:** {version}")
             else:
-                st.error(api_state["msg"])
-            if st.button("Refresh API discovery", use_container_width=True):
+                st.error("Backend unavailable")
+                st.caption(
+                    "Start the DM² backend (port 8080) or set `API_BASE_URL` in your environment."
+                )
+            if st.button("Reconnect", use_container_width=True):
                 refresh_api_state(force_refresh=True)
                 st.rerun()
 
-        with st.container(border=True):
-            st.caption("Live contract")
-            st.write(contract.get("title", "Digital Formulator API"))
-            st.write(f"{len(contract.get('paths', []))} documented paths")
-            if options.get("options_degraded"):
-                st.warning("Options endpoint returned degraded metadata. Simulation endpoints may still work.")
+        if options.get("options_degraded"):
+            st.warning("Backend returned partial metadata. Simulation pages remain functional.")
 
     if not api_state["ok"]:
         st.info(
-            "The backend Dockerfile and entrypoint in the sibling DM2-System-of-Models project expose port 8080. "
-            "If you are running the API locally, use an API base URL ending in 8080 unless your deployment remaps the port."
+            "The backend exposes its API on port 8080 by default. "
+            "Set the `API_BASE_URL` environment variable to the base URL of your deployment."
         )
         st.stop()
 
     catalog = get_component_catalog(options)
+
+    # ── Tool navigation cards ───────────────────────────────────────────
+    st.markdown(
+        "<div style='margin:1.5rem 0 0.75rem 0; font-family:\"Space Grotesk\",sans-serif;"
+        " font-size:1.05rem; font-weight:700; color:var(--ink);'>What would you like to do?</div>",
+        unsafe_allow_html=True,
+    )
     paths = contract.get("path_map", {})
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("API paths", len(contract.get("paths", [])))
-    m2.metric("Materials", len(catalog))
-    m3.metric("Objectives", len(options.get("available_objectives", [])))
-    m4.metric("Constraints", len(options.get("available_constraints", [])))
-
-    st.markdown("### Study modes")
     tool_cols = st.columns(5, gap="medium")
     tool_cards = [
-        ("Simulation", "Single Run", "Predict blend and tablet properties at one compaction pressure using the shared backend endpoint.", "/single_run"),
-        ("Simulation", "Multiple Run", "Fit compressibility and tensile profiles over a compaction-pressure range using the empirical profile endpoint.", "/multiple_run"),
-        ("Optimisation", "Digital Formulator", "Configure objectives, constraints, and search space, then run in-silico formulation optimisation.", "/digital_formulator"),
-        ("Comparison", "Formulation Comparison", "Run several candidate blends through the same single-run model and compare responses side by side.", "/single_run"),
-        ("Analysis", "Sensitivity Analysis", "Sweep one fraction or compaction pressure and observe design-space trends.", "/single_run"),
+        (
+            "Blend & Tablet Assessment",
+            "Single-Point Prediction",
+            "Choose a formulation composition and compaction pressure to receive a full prediction: "
+            "FFC, EAOIF, densities, particle size & shape distributions, tablet porosity and "
+            "tensile strength.",
+            "/single_run",
+            "pages/1_Single_Run.py",
+        ),
+        (
+            "Compressibility Profiling",
+            "Pressure–Range Analysis",
+            "Predict porosity and tensile-strength profiles across a compaction-pressure range. "
+            "Extracts Kawakita&#8211;Lud&#273;e and Duckworth empirical parameters for the blend.",
+            "/multiple_run",
+            "pages/2_Multiple_Run.py",
+        ),
+        (
+            "Formulation Optimisation",
+            "Digital Formulator",
+            "Define objectives (maximise FFC, tensile strength, porosity) and feasibility "
+            "constraints, then search the formulation design space using a genetic algorithm "
+            "to identify optimal candidate blends.",
+            "/digital_formulator",
+            "pages/3_Digital_Formulator.py",
+        ),
+        (
+            "Candidate Screening",
+            "Formulation Comparison",
+            "Run up to five candidate formulations through the same prediction model at specified "
+            "compaction pressures and compare all blend and tablet properties side by side with "
+            "radar and overlay charts.",
+            "/single_run",
+            "pages/4_Formulation_Comparison.py",
+        ),
+        (
+            "Design-Space Mapping",
+            "Sensitivity Analysis",
+            "Sweep one input variable — a component fraction or compaction pressure — across a "
+            "defined range and trace how each key performance indicator (FFC, tensile strength, "
+            "porosity) responds.",
+            "/single_run",
+            "pages/5_Sensitivity_Analysis.py",
+        ),
     ]
-    for col, (kicker, title, copy, endpoint) in zip(tool_cols, tool_cards):
-        status = "Live" if endpoint in paths else "Not published"
+    for col, (kicker, title, copy, endpoint, page_file) in zip(tool_cols, tool_cards):
+        live = endpoint in paths
+        foot = "Available" if live else "Backend unavailable"
         with col:
             st.markdown(
                 f"""
@@ -561,54 +631,70 @@ def _home() -> None:
   <div class='tool-kicker'>{kicker}</div>
   <h4>{title}</h4>
   <p>{copy}</p>
-  <div class='tool-foot'>{status}</div>
+  <div class='tool-foot'>{foot}</div>
 </div>
 """,
                 unsafe_allow_html=True,
             )
 
-    st.markdown("### API surface &amp; reference data")
-    tab_materials, tab_endpoints, tab_defaults = st.tabs(["Materials", "Endpoints", "Optimisation defaults"])
-
-    with tab_materials:
-        if catalog.empty:
-            st.info("The options endpoint did not return material metadata.")
-        else:
-            role_counts = catalog.groupby("Role").size().reset_index(name="Count")
-            left, right = st.columns([1, 2.5], gap="large")
-            with left:
-                st.dataframe(role_counts, use_container_width=True, hide_index=True)
-            with right:
-                st.dataframe(catalog, use_container_width=True, hide_index=True)
-
-    with tab_endpoints:
-        endpoint_rows = []
-        for path, methods in paths.items():
-            for method_name, info in methods.items():
-                endpoint_rows.append({"Method": method_name.upper(), "Path": path, "Summary": info.get("summary", "")})
-        endpoint_df = (
-            pd.DataFrame(endpoint_rows).sort_values(["Path", "Method"])
-            if endpoint_rows
-            else pd.DataFrame()
+    # ── Materials summary ───────────────────────────────────────────────
+    if not catalog.empty:
+        st.markdown(
+            "<div style='margin:1.5rem 0 0.5rem 0; font-family:\"Space Grotesk\",sans-serif;"
+            " font-size:1.05rem; font-weight:700; color:var(--ink);'>Available materials</div>",
+            unsafe_allow_html=True,
         )
-        st.dataframe(endpoint_df, use_container_width=True, hide_index=True)
+        api_mat   = catalog[catalog["Role"] == "API"]
+        filler_mat = catalog[catalog["Role"].isin(["Candidate filler", "Material"])]
+        fixed_mat  = catalog[catalog["Role"].isin(["Default disintegrant", "Default lubricant"])]
 
-    with tab_defaults:
-        defaults = options.get("current_defaults", {})
-        if defaults:
-            left, right = st.columns(2, gap="large")
-            with left:
-                st.dataframe(
-                    pd.DataFrame([{"Setting": k, "Value": str(v)} for k, v in defaults.items() if k != "constraints"]),
-                    use_container_width=True,
-                    hide_index=True,
+        mc1, mc2, mc3 = st.columns(3, gap="medium")
+        with mc1:
+            with st.container(border=True):
+                st.markdown(
+                    "<p class='form-section-title'>Active Pharmaceutical Ingredients</p>",
+                    unsafe_allow_html=True,
                 )
-            with right:
-                constraint_defaults = defaults.get("constraints", [])
-                if constraint_defaults:
-                    st.dataframe(pd.DataFrame(constraint_defaults), use_container_width=True, hide_index=True)
-        else:
-            st.info("No optimisation defaults were returned by the backend.")
+                if api_mat.empty:
+                    st.caption("None configured")
+                else:
+                    for _, row in api_mat.iterrows():
+                        st.markdown(
+                            f"<span class='role-pill role-api'>{row['Label']}</span>",
+                            unsafe_allow_html=True,
+                        )
+        with mc2:
+            with st.container(border=True):
+                st.markdown(
+                    "<p class='form-section-title'>Filler Excipients</p>",
+                    unsafe_allow_html=True,
+                )
+                if filler_mat.empty:
+                    st.caption("None configured")
+                else:
+                    for _, row in filler_mat.head(12).iterrows():
+                        st.markdown(
+                            f"<span class='role-pill role-filler'>{row['Label']}</span>",
+                            unsafe_allow_html=True,
+                        )
+        with mc3:
+            with st.container(border=True):
+                st.markdown(
+                    "<p class='form-section-title'>Fixed Functional Excipients</p>",
+                    unsafe_allow_html=True,
+                )
+                if fixed_mat.empty:
+                    st.caption("None configured")
+                else:
+                    for _, row in fixed_mat.iterrows():
+                        role_css = "role-disint" if "disint" in row["Role"].lower() else "role-lubricant"
+                        st.markdown(
+                            f"<span class='role-pill {role_css}'>{row['Label']} — {row['Role']}</span>",
+                            unsafe_allow_html=True,
+                        )
+
+        with st.expander("Full material catalogue", expanded=False):
+            st.dataframe(catalog, use_container_width=True, hide_index=True)
 
 
 _pg_home   = st.Page(_home, title="Home", icon="🏠", default=True)

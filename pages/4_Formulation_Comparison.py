@@ -51,10 +51,10 @@ def _name_key(index: int) -> str:
 
 
 render_page_header(
-    "Formulation Comparison",
-    "Run several candidate blends through the same single-run backend endpoint and compare predicted "
-    "granular, morphology, and tablet responses side by side.",
-    badge="/single_run",
+    "Head-to-Head Formulation Comparison",
+    "Run up to five candidate blends through the same predictive model and compare all granular, "
+    "morphological, and tablet properties side by side. Use the radar chart to identify "
+    "trade-offs between flowability, tensile strength, and porosity across your candidates.",
 )
 
 setup_left, setup_right = st.columns([1, 3], gap="large")
@@ -175,6 +175,11 @@ tab_table, tab_radar, tab_psd, tab_ar, tab_form, tab_raw = st.tabs(
 )
 
 with tab_table:
+    st.caption(
+        "Key: **FFC** > 10 free-flowing, 4\u201310 easy-flowing, 2\u20134 cohesive. "
+        "**EAOIF** < 41\u00b0 good. **Carr\u2019s index** < 15\u202f% excellent, > 35\u202f% very poor. "
+        "**Tensile strength** target \u2265 2\u202fMPa for robust tablets."
+    )
     st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
 with tab_radar:

@@ -42,10 +42,10 @@ cp_default_low  = float(default_cp_bounds[0]) if len(default_cp_bounds) == 2 els
 cp_default_high = float(default_cp_bounds[1]) if len(default_cp_bounds) == 2 else 250.0
 
 render_page_header(
-    "Multiple-Run Profile Analysis",
-    "Predict porosity and tensile-strength profiles across a compaction-pressure range and inspect "
-    "the empirical Kawakita and Duckworth parameters returned by the backend.",
-    badge="/multiple_run",
+    "Compressibility Profile Analysis",
+    "Predict tablet porosity and tensile-strength profiles across a compaction-pressure range. "
+    "The platform fits the Kawakita\u2013Lud\u017ee compressibility model and the Duckworth "
+    "tensile\u2013porosity relationship to characterise the full compactibility window of your blend.",
 )
 
 config_col, result_col = st.columns([1.15, 1.6], gap="large")
@@ -122,10 +122,26 @@ with result_col:
 
     # ── Empirical model parameters ──────────────────────────────────────
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Initial porosity a₀", f"{float(kawakita.get('init_por', 0.0)):.4f}")
-    k2.metric("Kawakita B",          f"{float(kawakita.get('B', 0.0)):.5f}")
-    k3.metric("Duckworth t̂",        f"{float(duckworth.get('t_hat', 0.0)):.4f} MPa")
-    k4.metric("Duckworth kB",        f"{float(duckworth.get('kb', 0.0)):.5f}")
+    k1.metric(
+        "Initial porosity (a₀)",
+        f"{float(kawakita.get('init_por', 0.0)):.4f}",
+        help="Kawakita–Luděe a parameter: porosity of the loosely packed bed before compression",
+    )
+    k2.metric(
+        "Kawakita B",
+        f"{float(kawakita.get('B', 0.0)):.5f}",
+        help="Kawakita–Luděe B parameter: reciprocal of the mean yield pressure; higher B = more compressible blend",
+    )
+    k3.metric(
+        "Duckworth t̂",
+        f"{float(duckworth.get('t_hat', 0.0)):.4f} MPa",
+        help="Duckworth characteristic tensile strength: tensile strength at zero porosity",
+    )
+    k4.metric(
+        "Duckworth kB",
+        f"{float(duckworth.get('kb', 0.0)):.5f}",
+        help="Duckworth compressibility factor: rate of tensile strength gain with decreasing porosity",
+    )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -145,17 +161,19 @@ with result_col:
 
     with tab_snapshot:
         s1, s2, s3, s4 = st.columns(4)
-        s1.metric("FFC",          f"{result['ffc']:.3f}")
-        s2.metric("Flow class",   metrics["flow_class"])
-        s3.metric("Porosity mean", f"{result['porosity_mean']:.4f}")
-        s4.metric("Tensile mean", f"{result['tensile_mean']:.3f} MPa")
+        s1.metric("FFC",           f"{result['ffc']:.3f}")
+        s2.metric("Flow class",    metrics["flow_class"])
+        s3.metric("Porosity (at lower CP)", f"{result['porosity_mean']:.4f}")
+        s4.metric("Tensile (at lower CP)",  f"{result['tensile_mean']:.3f} MPa")
         st.info(
-            f"Lower-bound pressure blend snapshot: Carr's index {metrics['carrs_index']:.2f} %, "
+            f"**Blend snapshot at the lower pressure bound ({payload_info.get('cp_min', cp_min):.0f} MPa):** "
+            f"Carr\u2019s index {metrics['carrs_index']:.2f}\u202f%, "
             f"Hausner ratio {metrics['hausner_ratio']:.3f}, "
-            f"EAOIF {result['effective_angle_of_internal_friction']:.2f}°."
+            f"EAOIF {result['effective_angle_of_internal_friction']:.2f}\u00b0. "
+            "These bulk-flow properties are pressure-independent and represent the uncompacted blend."
         )
         if result["effective_angle_of_internal_friction"] > 41.0:
-            st.warning("EAOIF exceeds the common 41° practical threshold for good powder flow.")
+            st.warning("EAOIF exceeds 41\u00b0 — this blend may exhibit poor hopper discharge. Consider adding a glidant or switching the filler grade.")
 
     with tab_formulation:
         chart_labels = [
