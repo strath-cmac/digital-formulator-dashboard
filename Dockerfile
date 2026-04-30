@@ -10,7 +10,7 @@ COPY . .
 # API backend URL — override at runtime with:
 #   docker run -e API_BASE_URL=http://<host>:8080 ...
 # The sibling DM2-System-of-Models FastAPI service exposes port 8080 by default.
-ENV API_BASE_URL=http://localhost:8080
+ENV API_BASE_URL=http://localhost:8000
 
 EXPOSE 8501
 
