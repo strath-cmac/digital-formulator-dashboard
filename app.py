@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from PIL import Image
 import pandas as pd
 import streamlit as st
 
 from utils.dashboard import get_component_catalog, refresh_api_state, render_page_header, render_top_nav
 
+_logo_path = Path(__file__).parent / "utils" / "cmac_logo.png"
+_page_icon: Image.Image | str = Image.open(_logo_path) if _logo_path.exists() else "🧬"
 
 st.set_page_config(
     page_title="Digital Formulator",
-    page_icon="🧬",
+    page_icon=_page_icon,
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -540,17 +545,12 @@ def _home() -> None:
         with st.container(border=True):
             if api_state["ok"]:
                 st.success("Backend connected")
-                base_url = contract.get("base_url", "")
-                if base_url:
-                    st.caption(f"**Endpoint:** `{base_url}`")
                 version = contract.get("version", "")
                 if version:
                     st.caption(f"**Version:** {version}")
             else:
                 st.error("Backend unavailable")
-                st.caption(
-                    "Start the backend (port 8080) or set `API_BASE_URL` in your environment."
-                )
+                st.caption("The backend service is currently unreachable. Please try again later.")
             if st.button("Reconnect", use_container_width=True):
                 refresh_api_state(force_refresh=True)
                 st.rerun()
@@ -559,10 +559,6 @@ def _home() -> None:
             st.warning("Backend returned partial metadata. Simulation pages remain functional.")
 
     if not api_state["ok"]:
-        st.info(
-            "The backend exposes its API on port 8080 by default. "
-            "Set the `API_BASE_URL` environment variable to the base URL of your deployment."
-        )
         st.stop()
 
     catalog = get_component_catalog(options)

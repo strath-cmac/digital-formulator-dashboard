@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -37,9 +38,13 @@ def render_top_nav(pages: Optional[Dict[str, Any]] = None) -> None:
     page is backed by a callable rather than a file path).
     """
     p = pages or {}
+    _logo = Path(__file__).parent / "cmac_logo.png"
     c0, c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.9, 0.9, 1.0, 1.5, 1.3, 1.2])
     with c0:
-        st.markdown("<div class='topnav-brand'>Digital Formulator</div>", unsafe_allow_html=True)
+        if _logo.exists():
+            st.image(str(_logo), width=150)
+        else:
+            st.markdown("<div class='topnav-brand'>Digital Formulator</div>", unsafe_allow_html=True)
     with c1:
         st.page_link(p.get("home", "app.py"), label="Home", use_container_width=True)
     with c2:
