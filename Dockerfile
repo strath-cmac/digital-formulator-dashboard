@@ -12,11 +12,11 @@ COPY . .
 # The sibling DM2-System-of-Models FastAPI service exposes port 8080 by default.
 ENV API_BASE_URL=http://localhost:8080
 
-EXPOSE 8501
+EXPOSE 8001
 
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+HEALTHCHECK CMD curl --fail http://localhost:8001/_stcore/health || exit 1
 
 ENTRYPOINT ["streamlit", "run", "app.py", \
-            "--server.port=8501", \
+            "--server.port=8001", \
             "--server.address=0.0.0.0", \
             "--server.headless=true"]
