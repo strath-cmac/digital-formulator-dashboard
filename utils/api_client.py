@@ -48,8 +48,8 @@ _BUILTIN_COMPONENT_LABELS: Dict[str, str] = {
     "sh15": "HPMC (Methocel K4M)",
     "sh16": "HPMC",
     "dc1": "Di-calcium phosphate",
-    "gr1": "Granulated excipient",
-    "gr2": "Granulated excipient",
+    "gr1": "Griseofulvin [API]",
+    "gr2": "Griseofulvin [API]",
     "sp1": "Starch",
     "sp2": "Starch",
     "sp3": "Starch",
@@ -71,7 +71,7 @@ _BUILTIN_COMPONENT_LABELS: Dict[str, str] = {
 }
 
 _BUILTIN_API_IDS: frozenset[str] = frozenset(
-    {"as1", "as2", "dm1", "ib1", "ib2", "ib6", "rp1", "sh1", "sh2", "caf"}
+    {"as1", "as2", "dm1", "gr1", "gr2", "ib1", "ib2", "ib6", "rp1", "sh1", "sh2", "caf"}
 )
 
 # Disintegrants: CCS (croscarmellose sodium) and grades
@@ -81,7 +81,7 @@ _BUILTIN_DISINTEGRANT_IDS: frozenset[str] = frozenset({"cc1", "cc2", "cc3", "cc4
 _BUILTIN_LUBRICANT_IDS: frozenset[str] = frozenset({"ms1", "ms2", "ms4", "ms5"})
 
 # Filler / bulk excipient prefixes
-_FILLER_PREFIXES: frozenset[str] = frozenset({"la", "ma", "mc", "dc", "sp", "gr"})
+_FILLER_PREFIXES: frozenset[str] = frozenset({"la", "ma", "mc", "dc", "sp"})
 
 # Fallback objectives and constraints when the backend does not expose them
 _BUILTIN_OBJECTIVES: List[str] = [
