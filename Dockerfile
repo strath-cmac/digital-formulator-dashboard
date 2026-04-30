@@ -19,4 +19,4 @@ HEALTHCHECK CMD curl --fail http://localhost:8001/_stcore/health || exit 1
 ENTRYPOINT ["streamlit", "run", "app.py", \
             "--server.port=8001", \
             "--server.address=0.0.0.0", \
-            "--server.headless=true"]
+            "--server.headless=true"] 

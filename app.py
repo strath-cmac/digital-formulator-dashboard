@@ -549,7 +549,7 @@ def _home() -> None:
             else:
                 st.error("Backend unavailable")
                 st.caption(
-                    "Start the DM² backend (port 8080) or set `API_BASE_URL` in your environment."
+                    "Start the backend (port 8080) or set `API_BASE_URL` in your environment."
                 )
             if st.button("Reconnect", use_container_width=True):
                 refresh_api_state(force_refresh=True)
