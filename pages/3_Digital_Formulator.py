@@ -132,11 +132,11 @@ with left_col:
     with st.container(border=True):
         st.markdown("**Optimisation Objectives**")
         _OBJ_LABELS = {
-            "maximize_ffc":           "Maximise FFC (powder flowability)",
-            "maximize_tensile_mean":  "Maximise tensile strength (tablet integrity)",
-            "minimize_true_density":  "Minimise true density",
-            "maximize_porosity_mean": "Maximise tablet porosity",
-            "minimize_eaoif":         "Minimise EAOIF (reduce internal friction)",
+            "maximise_ffc":           "Maximise FFC (powder flowability)",
+            "maximise_tensile":       "Maximise tensile strength (tablet integrity)",
+            "maximise_porosity":      "Maximise tablet porosity",
+            "minimise_eaoif":         "Minimise EAOIF (reduce internal friction)",
+            "minimise_tablet_weight": "Minimise tablet weight",
         }
         objective_display_options = [_OBJ_LABELS.get(o, o) for o in avail_objectives]
         obj_display_to_id = {_OBJ_LABELS.get(o, o): o for o in avail_objectives}
@@ -404,11 +404,11 @@ with tab_constraints:
         "porosity_minus_std_min":"Porosity \u2212 \u03c3 \u2265 threshold (conservative)",
     }
     _OBJ_DISPLAY = {
-        "maximize_ffc":           "Maximise FFC",
-        "maximize_tensile_mean":  "Maximise tensile strength",
-        "minimize_true_density":  "Minimise true density",
-        "maximize_porosity_mean": "Maximise porosity",
-        "minimize_eaoif":         "Minimise EAOIF",
+        "maximise_ffc":           "Maximise FFC",
+        "maximise_tensile":       "Maximise tensile strength",
+        "maximise_porosity":      "Maximise porosity",
+        "minimise_eaoif":         "Minimise EAOIF",
+        "minimise_tablet_weight": "Minimise tablet weight",
     }
     constraints_to_check = request_info.get("constraints", [])
     if constraints_to_check:

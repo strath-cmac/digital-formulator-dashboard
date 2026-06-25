@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -46,33 +47,40 @@ _BUILTIN_COMPONENT_LABELS: Dict[str, str] = {
     "mc7": "MCC (Avicel PH200)",
     "sh14": "HPMC (Pharmacoat 603)",
     "sh15": "HPMC (Methocel K4M)",
-    "sh16": "HPMC",
     "dc1": "Di-calcium phosphate",
     "gr1": "Griseofulvin [API]",
     "gr2": "Griseofulvin [API]",
-    "sp1": "Starch",
-    "sp2": "Starch",
-    "sp3": "Starch",
-    "sp4": "Starch",
-    "sp5": "Starch",
+    "sp1": "Paracetamol [API]",
+    "sp2": "Paracetamol [API]",
+    "sp3": "Paracetamol [API]",
+    "sp4": "Paracetamol [API]",
+    "sp5": "Paracetamol [API]",
     "ms2": "Magnesium stearate alt.",
     "ms4": "Magnesium stearate alt.",
     "ms5": "Magnesium stearate alt.",
-    "as1": "API - as1",
-    "as2": "API - as2",
+    "as1": "Aspirin [API]",
+    "as2": "Aspirin [API]",
     "dm1": "Dexamethasone [API]",
-    "ib1": "Ibuprofen - ib1 [API]",
+    "ib1": "Ibuprofen [API]",
     "ib2": "Ibuprofen [API]",
-    "ib6": "Ibuprofen - ib6 [API]",
+    "ib6": "Ibuprofen [API]",
     "rp1": "API - rp1 [API]",
     "sh1": "API - sh1 [API]",
     "sh2": "API - sh2 [API]",
     "caf": "Caffeine [API]",
 }
 
-_BUILTIN_API_IDS: frozenset[str] = frozenset(
-    {"as1", "as2", "dm1", "gr1", "gr2", "ib1", "ib2", "ib6", "rp1", "sh1", "sh2", "caf"}
-)
+_BUILTIN_API_IDS: frozenset[str] = frozenset({
+    "as1", "as2",                              # aspirin
+    "dm1",                                     # dexamethasone
+    "gr1", "gr2",                              # griseofulvin
+    "ib1", "ib2", "ib6",                       # ibuprofen
+    "sp1", "sp2", "sp3", "sp4", "sp5",         # paracetamol
+    "rp1",                                     # other known APIs
+    "sh1", "sh2", "sh6", "sh16", "sh17",       # Shionogi compounds
+    "azd0780", "dh1", "it1", "ch1", "cf1", "az1",
+    "caf",                                     # caffeine
+})
 
 # Disintegrants: CCS (croscarmellose sodium) and grades
 _BUILTIN_DISINTEGRANT_IDS: frozenset[str] = frozenset({"cc1", "cc2", "cc3", "cc4", "cc5"})
@@ -81,15 +89,53 @@ _BUILTIN_DISINTEGRANT_IDS: frozenset[str] = frozenset({"cc1", "cc2", "cc3", "cc4
 _BUILTIN_LUBRICANT_IDS: frozenset[str] = frozenset({"ms1", "ms2", "ms4", "ms5"})
 
 # Filler / bulk excipient prefixes
-_FILLER_PREFIXES: frozenset[str] = frozenset({"la", "ma", "mc", "dc", "sp"})
+_FILLER_PREFIXES: frozenset[str] = frozenset({"la", "ma", "mc", "dc"})
 
-# Fallback objectives and constraints when the backend does not expose them
+# API group-code prefixes from the raw material master database.
+# Any ID whose leading alpha prefix matches one of these is an API.
+_API_PREFIXES: frozenset = frozenset({
+    "sp",   # paracetamol (various grades/brands)
+    "mp",   # micronized paracetamol
+    "gp",   # granular paracetamol
+    "gr",   # griseofulvin
+    "ib",   # ibuprofen
+    "im",   # ibuprofen micronized
+    "as",   # aspirin
+    "dm",   # dexamethasone
+    "mf",   # metformin
+    "pb",   # phenobarbitone
+    "mh",   # metformin hydrochloride
+    "gf",   # griseofulvin fine
+    "lo",   # loratadine
+    "bz",   # benzocaine
+    "th",   # theophylline
+})
+
+# API IDs that don't follow the simple prefix pattern (e.g. sh* are both APIs and
+# excipients, so we use explicit IDs rather than the "sh" prefix).
+_KNOWN_API_EXTRA_IDS: frozenset = frozenset({
+    "sh1", "sh2", "sh6", "sh16", "sh17",   # Shionogi compounds
+    "rp1", "azd0780", "dh1", "it1", "ch1", "cf1", "az1",
+    "caf",                                  # caffeine
+})
+
+
+def _is_api_by_id(cid: str) -> bool:
+    """Return True when *cid* is an API based on its group-code prefix or explicit ID."""
+    if cid in _KNOWN_API_EXTRA_IDS:
+        return True
+    m = re.match(r"^([a-zA-Z]+)", cid)
+    return bool(m) and m.group(1).lower() in _API_PREFIXES
+
+# Fallback objectives and constraints when the backend does not expose them.
+# Keys must match the OBJECTIVE_REGISTRY in insilico_formulation_optimisation_v4.py
+# (British spelling throughout).
 _BUILTIN_OBJECTIVES: List[str] = [
-    "maximize_ffc",
-    "maximize_tensile_mean",
-    "minimize_true_density",
-    "maximize_porosity_mean",
-    "minimize_eaoif",
+    "maximise_ffc",
+    "maximise_tensile",
+    "maximise_porosity",
+    "minimise_eaoif",
+    "minimise_tablet_weight",
 ]
 
 _BUILTIN_CONSTRAINTS: List[str] = [
@@ -344,9 +390,21 @@ def _normalise_options(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not available_apis and registry_apis:
         available_apis = list(registry_apis.keys())
 
+    # The server's /digital_formulator/options does not return available_apis —
+    # it lumps everything under available_excipients. When that's the case, classify
+    # from the full component list using the known API group-code prefixes.
+    if not data.get("available_apis") and available_components:
+        available_apis = [cid for cid in available_components if _is_api_by_id(cid)]
+
     available_excipients = _coerce_string_list(data.get("available_excipients"))
     if not available_excipients and registry_excipients:
         available_excipients = list(registry_excipients.keys())
+
+    # Server returns all materials under "available_excipients" without classifying them.
+    # Strip out APIs so this list contains only genuine excipients.
+    if available_excipients and available_apis:
+        _api_set = set(available_apis)
+        available_excipients = [cid for cid in available_excipients if cid not in _api_set]
 
     available_components = _dedupe_ids([*available_components, *available_apis, *available_excipients])
     if not available_components and registry_all:
