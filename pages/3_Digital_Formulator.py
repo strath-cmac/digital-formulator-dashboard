@@ -16,6 +16,7 @@ from utils.api_client import (
     get_lubricant_choices,
     is_disintegrant,
     is_lubricant,
+    resolve_component_name,
 )
 from utils.dashboard import (
     component_select_maps,
@@ -458,10 +459,38 @@ if result is None:
     st.stop()
 
 metrics              = derived_metrics(result)
-optimized_components = result.get("optimized_components", [])
+_server_components   = result.get("optimized_components", [])
 optimized_fractions  = result.get("optimized_fractions", [])
 
-# Top summary line showing ID + name
+# ── Resolve server-returned generic names back to specific component IDs ──────
+# The /digital_formulator endpoint converts IDs → generic names before returning.
+# Order is always: [API, Disintegrant, Filler(s)..., Lubricant].
+# We recover the original IDs from the request context so we can show grade names
+# and classify roles correctly.
+_req_cmac    = request_info.get("cmac_id", "")
+_req_dis     = request_info.get("disintegrant_id", "")
+_req_lub     = request_info.get("lubricant_id", "")
+_req_fillers = list(request_info.get("excipient_options", []))
+
+_n = len(_server_components)
+optimized_components: list = []
+_filler_pool = list(_req_fillers)
+
+for _i, _sname in enumerate(_server_components):
+    if _i == 0:
+        optimized_components.append(_req_cmac or _sname)
+    elif _i == 1 and _n > 2:
+        optimized_components.append(_req_dis or _sname)
+    elif _i == _n - 1:
+        optimized_components.append(_req_lub or _sname)
+    else:
+        # Filler slot: match generic name against remaining submitted filler IDs
+        _matched = resolve_component_name(_sname, _filler_pool)
+        if _matched in _filler_pool:
+            _filler_pool.remove(_matched)
+        optimized_components.append(_matched)
+
+# Top summary line showing ID + grade name
 summary_parts = []
 for cid, frac in zip(optimized_components, optimized_fractions):
     name = component_label(cid, options)

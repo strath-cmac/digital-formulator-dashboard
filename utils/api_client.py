@@ -215,6 +215,91 @@ def _is_api_by_id(cid: str) -> bool:
     m = re.match(r"^([a-zA-Z]+)", cid)
     return bool(m) and m.group(1).lower() in _API_PREFIXES
 
+
+# Server-returned generic names (from the xlsx "Name" column only, no grade info).
+# The /digital_formulator endpoint converts IDs to these names before returning.
+# Used to reverse-map results back to specific component IDs.
+_GENERIC_NAMES: Dict[str, str] = {
+    "mc1": "Microcrystalline cellulose",
+    "mc2": "Microcrystalline cellulose",
+    "mc3": "Microcrystalline cellulose",
+    "mc4": "Microcrystalline cellulose",
+    "mc5": "Microcrystalline cellulose",
+    "mc6": "Microcrystalline cellulose",
+    "mc7": "Microcrystalline cellulose",
+    "mc8": "Microcrystalline cellulose",
+    "mc9": "Microcrystalline cellulose",
+    "la1": "Lactose monohydrate",
+    "la2": "Lactose",
+    "la3": "Lactose monohydrate",
+    "la4": "Lactose",
+    "la5": "Lactose",
+    "la6": "Lactose monohydrate",
+    "la7": "Lactose monohydrate",
+    "la8": "Lactose monohydrate",
+    "la9": "Lactose monohydrate",
+    "la10": "Lactose monohydrate",
+    "ma1": "Mannitol", "ma2": "Mannitol", "ma3": "D-mannitol",
+    "ma4": "Mannitol", "ma5": "Mannogem EZ",
+    "ma6": "Mannogem XL", "ma7": "Mannogem XL-Opal",
+    "dc1": "Dicalcium phosphate anhydrous",
+    "dc2": "Dicalcium phosphate anhydrous granular",
+    "cc1": "Croscarmellose sodium", "cc2": "Croscarmellose sodium",
+    "cc3": "Croscarmellose sodium", "cc4": "Croscarmellose sodium",
+    "cc5": "Croscarmellose sodium", "cc6": "Croscarmellose sodium",
+    "xp1": "Crospovidone",
+    "ss1": "Sodium starch glycolate", "ex1": "Sodium starch glycolate",
+    "ls1": "Low-substituted hydroxypropyl",
+    "ms1": "Magnesium stearate", "ms2": "Magnesium stearate",
+    "ms3": "Magnesium stearate", "ms4": "Magnesium stearate",
+    "ms5": "Magnesium stearate",
+    "sp1": "Paracetamol powder", "sp2": "Paracetamol",
+    "sp3": "Paracetamol", "sp4": "Paracetamol",
+    "sp5": "Paracetamol", "sp6": "Paracetamol", "sp7": "Paracetamol",
+    "mp1": "Paracetamol micronised",
+    "gp1": "Granular Paracetamol",
+    "ib1": "Ibuprofen", "ib2": "Ibuprofen", "ib3": "Ibuprofen",
+    "ib4": "Ibuprofen", "ib5": "Ibuprofen",
+    "ib6": "Ibuprofen", "ib7": "Ibuprofen",
+    "as1": "Acetylsalicylic acid", "as2": "Acetylsalicylic acid",
+    "dm1": "Dexamethasone",
+    "gr1": "Griseofulvin", "gr2": "Griseofulvin",
+    "im1": "Indomethacin", "im2": "Indomethacin",
+    "mf1": "Mefenamic Acid",
+    "mh1": "Metformin hydrochloride",
+    "lo1": "Lovastatin", "lo2": "Lovastatin",
+    "bz1": "Benzoic acid", "bz2": "Benzoic acid",
+    "bz3": "Theophylline", "bz4": "Benzoic acid",
+    "gf1": "Guaifenesin", "pb1": "Probucol",
+    "rp1": "Raltegravir Potassium",
+    "az1": "AZD 4954", "azd0780": "AZD0780",
+    "dh1": "Doxycycline Hyclate", "it1": "Levetiracetam",
+    "ch1": "Ciprofloxacin Hydrochloride",
+    "cf1": "Caffeine", "caf": "Caffeine",
+    "sh1": "Compound A", "sh2": "Compound A", "sh6": "Compound B",
+    "sh16": "BNP 14770", "sh17": "S-247995",
+}
+
+
+def resolve_component_name(server_name: str, candidate_ids: Iterable[str]) -> str:
+    """Map a server-returned generic name back to a specific component ID.
+
+    Searches *candidate_ids* for one whose known generic name matches *server_name*.
+    On exact match returns that ID; falls back to case-insensitive substring; falls
+    back to *server_name* itself when nothing matches.
+    """
+    lower = server_name.strip().lower()
+    # Exact match first
+    for cid in candidate_ids:
+        if _GENERIC_NAMES.get(cid, "").strip().lower() == lower:
+            return cid
+    # Substring fallback
+    for cid in candidate_ids:
+        g = _GENERIC_NAMES.get(cid, "").strip().lower()
+        if g and (g in lower or lower in g):
+            return cid
+    return server_name
+
 # Fallback objectives and constraints when the backend does not expose them.
 # Keys must match the OBJECTIVE_REGISTRY in insilico_formulation_optimisation_v4.py
 # (British spelling throughout).
