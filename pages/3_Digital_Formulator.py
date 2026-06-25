@@ -61,16 +61,18 @@ def _component_role(cid: str, cmac_id: str) -> str:
     return "📦 Filler"
 
 
-# Constraint labels: show direction (≥/≤) and whether prediction std dev is included.
-_CON_ID_TO_LABEL: dict = {
-    "tensile_strength_min":   "Tensile (μ−σ) ≥ threshold [MPa]  ·  conservative, includes variability",
-    "tensile_mean_min":       "Tensile mean μ ≥ threshold [MPa]  ·  mean only",
-    "ffc_min":                "FFC μ ≥ threshold  ·  flowability lower bound",
-    "eaoif_max":              "EAOIF μ ≤ threshold [°]  ·  internal friction upper bound",
-    "porosity_min":           "Porosity mean μ ≥ threshold  ·  lower bound, mean only",
-    "porosity_minus_std_min": "Porosity (μ−σ) ≥ threshold  ·  conservative, includes variability",
+# Short ASCII-only constraint labels used in per-row selectboxes.
+# No special unicode chars (μ σ ≥ ≤ ·) — avoids Streamlit widget state corruption.
+_CON_LABELS: dict = {
+    "tensile_strength_min":   "Tensile (mean-std) >= threshold [MPa]  [conservative]",
+    "tensile_mean_min":       "Tensile mean >= threshold [MPa]  [mean only]",
+    "ffc_min":                "FFC >= threshold  [flowability lower bound]",
+    "eaoif_max":              "EAOIF <= threshold [deg]  [friction upper limit]",
+    "porosity_min":           "Porosity mean >= threshold  [lower bound, mean only]",
+    "porosity_minus_std_min": "Porosity (mean-std) >= threshold  [conservative]",
 }
-_CON_LABEL_TO_ID: dict = {v: k for k, v in _CON_ID_TO_LABEL.items()}
+_CON_LABEL_TO_ID: dict = {v: k for k, v in _CON_LABELS.items()}
+_CON_OPTIONS: list = list(_CON_LABELS.values())
 
 # ─── API state & options ───────────────────────────────────────────────────────
 api_state = refresh_api_state()
@@ -105,19 +107,18 @@ avail_objectives  = options.get("available_objectives", [])
 avail_constraints = options.get("available_constraints", [])
 default_constraints = defaults.get("constraints", [])
 
-# Initialise constraint editor state (stores friendly labels + active flag)
-if "df_constraints_table" not in st.session_state:
-    initial_rows = [
+# Initialise constraint editor state as a plain list of dicts
+if "df_constraints_list" not in st.session_state:
+    st.session_state["df_constraints_list"] = [
         {
             "active":    True,
-            "name":      _CON_ID_TO_LABEL.get(c.get("name", ""), c.get("name", "")),
+            "con_id":    c.get("name", avail_constraints[0] if avail_constraints else "tensile_strength_min"),
             "threshold": float(c.get("threshold", 0.0)),
         }
         for c in (default_constraints or [])
     ]
-    st.session_state["df_constraints_table"] = pd.DataFrame(
-        initial_rows or [], columns=["active", "name", "threshold"]
-    )
+if "df_con_gen" not in st.session_state:
+    st.session_state["df_con_gen"] = 0
 
 render_page_header(
     "In-Silico Formulation Optimisation",
@@ -195,52 +196,66 @@ with left_col:
         hc1.markdown("**Feasibility Constraints**")
         hc1.caption(
             "Thresholds any accepted formulation must satisfy. "
-            "**μ** = predicted mean · **σ** = predicted std dev. "
-            "Use **μ−σ** constraints for a conservative design that accounts for prediction variability."
+            "mean-std constraints are conservative and account for prediction variability."
         )
         with hc2:
             if st.button("Reset", use_container_width=True, key="df_reset_constraints"):
-                initial_rows = [
+                st.session_state["df_constraints_list"] = [
                     {
                         "active":    True,
-                        "name":      _CON_ID_TO_LABEL.get(c.get("name", ""), c.get("name", "")),
+                        "con_id":    c.get("name", avail_constraints[0] if avail_constraints else "tensile_strength_min"),
                         "threshold": float(c.get("threshold", 0.0)),
                     }
                     for c in (default_constraints or [])
                 ]
-                st.session_state["df_constraints_table"] = pd.DataFrame(
-                    initial_rows or [], columns=["active", "name", "threshold"]
-                )
+                st.session_state["df_con_gen"] += 1
                 st.rerun()
 
-        constraint_df = st.data_editor(
-            st.session_state["df_constraints_table"],
-            key="df_constraints_editor",
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "active": st.column_config.CheckboxColumn(
-                    "✓",
-                    help="Check to include this constraint in the optimisation.",
-                    default=True,
-                ),
-                "name": st.column_config.SelectboxColumn(
-                    "Constraint type",
-                    options=list(_CON_ID_TO_LABEL.values()),
-                    required=True,
-                    help="Labels show direction (≥ or ≤) and whether prediction uncertainty (σ) is included.",
-                ),
-                "threshold": st.column_config.NumberColumn(
-                    "Threshold",
-                    step=0.01,
-                    format="%.4f",
-                    required=True,
-                    help="Constraint is satisfied when the predicted property meets this threshold.",
-                ),
-            },
-        )
-        st.session_state["df_constraints_table"] = constraint_df
+        con_list = st.session_state["df_constraints_list"]
+        gen      = st.session_state["df_con_gen"]
+
+        _to_delete = None
+        if con_list:
+            hrow = st.columns([0.5, 4.5, 1.5, 0.8])
+            hrow[0].caption("On")
+            hrow[1].caption("Constraint type")
+            hrow[2].caption("Threshold")
+            hrow[3].caption("")
+            for i, con in enumerate(con_list):
+                row = st.columns([0.5, 4.5, 1.5, 0.8])
+                con["active"] = row[0].checkbox(
+                    "a", value=con.get("active", True),
+                    key=f"g{gen}_ca_{i}", label_visibility="collapsed",
+                )
+                current_label = _CON_LABELS.get(con.get("con_id", ""), _CON_OPTIONS[0])
+                try:
+                    sel_idx = _CON_OPTIONS.index(current_label)
+                except ValueError:
+                    sel_idx = 0
+                selected_label = row[1].selectbox(
+                    "n", options=_CON_OPTIONS, index=sel_idx,
+                    key=f"g{gen}_cn_{i}", label_visibility="collapsed",
+                )
+                con["con_id"] = _CON_LABEL_TO_ID.get(selected_label, con.get("con_id", ""))
+                con["threshold"] = row[2].number_input(
+                    "t", value=float(con.get("threshold", 0.0)),
+                    step=0.01, format="%.4f",
+                    key=f"g{gen}_ct_{i}", label_visibility="collapsed",
+                )
+                if row[3].button("✕", key=f"g{gen}_cd_{i}", use_container_width=True):
+                    _to_delete = i
+        else:
+            st.caption("No constraints defined. Click '+ Add constraint' to add one.")
+
+        if _to_delete is not None:
+            con_list.pop(_to_delete)
+            st.session_state["df_con_gen"] += 1
+            st.rerun()
+
+        if st.button("+ Add constraint", key="df_add_constraint"):
+            default_con_id = avail_constraints[0] if avail_constraints else "tensile_strength_min"
+            con_list.append({"active": True, "con_id": default_con_id, "threshold": 0.0})
+            st.rerun()
 
 with right_col:
 
@@ -343,14 +358,14 @@ with right_col:
 run_clicked = st.button("▶  Run Optimisation", type="primary", use_container_width=True)
 
 if run_clicked:
-    # Build constraint payload: map friendly labels → raw IDs, skip inactive rows
+    # Build constraint payload from the list-based state; skip inactive rows
     cleaned_constraints = [
         {
-            "name":      _CON_LABEL_TO_ID.get(str(row["name"]), str(row["name"])),
-            "threshold": float(row["threshold"]),
+            "name":      con["con_id"],
+            "threshold": float(con["threshold"]),
         }
-        for _, row in constraint_df.dropna(subset=["name", "threshold"]).iterrows()
-        if bool(row.get("active", True))
+        for con in st.session_state.get("df_constraints_list", [])
+        if con.get("active", True) and con.get("con_id")
     ]
     filtered_fillers = [
         cid for cid in excipient_options
