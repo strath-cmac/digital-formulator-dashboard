@@ -366,7 +366,7 @@ def render_smart_formulation_editor(
                 "Disint fraction",
                 min_value=0.01,
                 max_value=0.20,
-                value=float(defaults.get("disintegrant_fraction", 0.08)),
+                value=float(defaults.get("disintegrant_fraction", 0.04)),
                 step=0.005,
                 key=f"_sfe_{key_prefix}_di_f",
                 format="%.3f",

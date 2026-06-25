@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import json
+import threading
+import time as _time
 
 import pandas as pd
 import streamlit as st
 
 from utils.api_client import (
+    component_label,
     digital_formulator,
     get_component_choices,
     get_disintegrant_choices,
     get_filler_choices,
     get_lubricant_choices,
+    is_disintegrant,
+    is_lubricant,
 )
 from utils.dashboard import (
     component_select_maps,
@@ -46,6 +51,28 @@ def _constraint_status(result: dict, name: str, threshold: float) -> tuple[str, 
     return ("Unknown", float("nan"))
 
 
+def _component_role(cid: str, cmac_id: str) -> str:
+    if cid == cmac_id:
+        return "💊 API"
+    if is_disintegrant(cid):
+        return "🧪 Disintegrant"
+    if is_lubricant(cid):
+        return "⚙️ Lubricant"
+    return "📦 Filler"
+
+
+# Constraint labels: show direction (≥/≤) and whether prediction std dev is included.
+_CON_ID_TO_LABEL: dict = {
+    "tensile_strength_min":   "Tensile (μ−σ) ≥ threshold [MPa]  ·  conservative, includes variability",
+    "tensile_mean_min":       "Tensile mean μ ≥ threshold [MPa]  ·  mean only",
+    "ffc_min":                "FFC μ ≥ threshold  ·  flowability lower bound",
+    "eaoif_max":              "EAOIF μ ≤ threshold [°]  ·  internal friction upper bound",
+    "porosity_min":           "Porosity mean μ ≥ threshold  ·  lower bound, mean only",
+    "porosity_minus_std_min": "Porosity (μ−σ) ≥ threshold  ·  conservative, includes variability",
+}
+_CON_LABEL_TO_ID: dict = {v: k for k, v in _CON_ID_TO_LABEL.items()}
+
+# ─── API state & options ───────────────────────────────────────────────────────
 api_state = refresh_api_state()
 if not api_state["ok"]:
     st.error(api_state["msg"])
@@ -64,24 +91,32 @@ if not components:
     st.stop()
 
 display_options, label_to_id = component_select_maps(options)
-label_by_id = {cid: lbl for lbl, cid in label_to_id.items()}
 
-defaults      = options.get("current_defaults", {})
+defaults       = options.get("current_defaults", {})
 api_candidates = options.get("available_apis", []) or components
-disint_ids    = get_disintegrant_choices(options) or [defaults.get("disintegrant_id", components[0])]
-lubricant_ids = get_lubricant_choices(options)    or [defaults.get("lubricant_id",    components[0])]
-filler_ids    = get_filler_choices(options)       or [
+disint_ids     = get_disintegrant_choices(options) or [defaults.get("disintegrant_id", components[0])]
+lubricant_ids  = get_lubricant_choices(options)    or [defaults.get("lubricant_id",    components[0])]
+filler_ids     = get_filler_choices(options)       or [
     cid for cid in components
     if cid not in set(api_candidates) | set(disint_ids) | set(lubricant_ids)
 ]
 
 avail_objectives  = options.get("available_objectives", [])
 avail_constraints = options.get("available_constraints", [])
-
 default_constraints = defaults.get("constraints", [])
+
+# Initialise constraint editor state (stores friendly labels + active flag)
 if "df_constraints_table" not in st.session_state:
+    initial_rows = [
+        {
+            "active":    True,
+            "name":      _CON_ID_TO_LABEL.get(c.get("name", ""), c.get("name", "")),
+            "threshold": float(c.get("threshold", 0.0)),
+        }
+        for c in (default_constraints or [])
+    ]
     st.session_state["df_constraints_table"] = pd.DataFrame(
-        default_constraints or [], columns=["name", "threshold"]
+        initial_rows or [], columns=["active", "name", "threshold"]
     )
 
 render_page_header(
@@ -99,7 +134,7 @@ left_col, right_col = st.columns([1.1, 1.3], gap="large")
 
 with left_col:
 
-    # ── 1. API & target loading ─────────────────────────────────────────
+    # ── 1. API & target loading ─────────────────────────────────────────────
     with st.container(border=True):
         st.markdown(
             "<div class='role-pill role-api'>💊 API &amp; Target Drug Loading</div>",
@@ -111,7 +146,7 @@ with left_col:
         cmac_id    = api_map[cmac_label]
 
         dl_col, var_col = st.columns([2, 1])
-        drug_loading         = dl_col.slider("Target drug loading (w/w)", min_value=0.01, max_value=0.80, value=0.20, step=0.01)
+        drug_loading          = dl_col.slider("Target drug loading (w/w)", min_value=0.01, max_value=0.80, value=0.20, step=0.01)
         api_fraction_variable = var_col.toggle("Vary API fraction", value=True)
 
         api_fraction_bounds = None
@@ -128,7 +163,7 @@ with left_col:
                 else:
                     st.error("API lower bound must be smaller than the upper bound.")
 
-    # ── 2. Objectives ───────────────────────────────────────────────────
+    # ── 2. Objectives ───────────────────────────────────────────────────────
     with st.container(border=True):
         st.markdown("**Optimisation Objectives**")
         _OBJ_LABELS = {
@@ -154,28 +189,30 @@ with left_col:
         else:
             st.caption("No objectives selected — the backend will apply its configured defaults.")
 
-    # ── 3. Constraints ──────────────────────────────────────────────────
+    # ── 3. Constraints ──────────────────────────────────────────────────────
     with st.container(border=True):
         hc1, hc2 = st.columns([3, 1])
         hc1.markdown("**Feasibility Constraints**")
         hc1.caption(
-            "Set minimum or maximum thresholds that any accepted formulation must satisfy. "
-            "Violations are penalised during the genetic algorithm search."
+            "Thresholds any accepted formulation must satisfy. "
+            "**μ** = predicted mean · **σ** = predicted std dev. "
+            "Use **μ−σ** constraints for a conservative design that accounts for prediction variability."
         )
         with hc2:
-            if st.button("Reset to defaults", use_container_width=True, key="df_reset_constraints"):
+            if st.button("Reset", use_container_width=True, key="df_reset_constraints"):
+                initial_rows = [
+                    {
+                        "active":    True,
+                        "name":      _CON_ID_TO_LABEL.get(c.get("name", ""), c.get("name", "")),
+                        "threshold": float(c.get("threshold", 0.0)),
+                    }
+                    for c in (default_constraints or [])
+                ]
                 st.session_state["df_constraints_table"] = pd.DataFrame(
-                    default_constraints or [], columns=["name", "threshold"]
+                    initial_rows or [], columns=["active", "name", "threshold"]
                 )
                 st.rerun()
-        _CON_LABELS = {
-            "tensile_strength_min":  "Min tensile strength (lower bound, MPa)",
-            "tensile_mean_min":      "Min mean tensile strength (MPa)",
-            "ffc_min":               "Min FFC (flowability threshold)",
-            "eaoif_max":             "Max EAOIF (°) — upper limit on internal friction",
-            "porosity_min":          "Min porosity (lower bound)",
-            "porosity_minus_std_min":"Min porosity minus std (conservative lower bound)",
-        }
+
         constraint_df = st.data_editor(
             st.session_state["df_constraints_table"],
             key="df_constraints_editor",
@@ -183,15 +220,23 @@ with left_col:
             use_container_width=True,
             hide_index=True,
             column_config={
+                "active": st.column_config.CheckboxColumn(
+                    "✓",
+                    help="Check to include this constraint in the optimisation.",
+                    default=True,
+                ),
                 "name": st.column_config.SelectboxColumn(
                     "Constraint type",
-                    options=avail_constraints,
+                    options=list(_CON_ID_TO_LABEL.values()),
                     required=True,
-                    help="Select the property and direction this constraint applies to.",
+                    help="Labels show direction (≥ or ≤) and whether prediction uncertainty (σ) is included.",
                 ),
                 "threshold": st.column_config.NumberColumn(
-                    "Threshold value", step=0.01, format="%.4f", required=True,
-                    help="The constraint is satisfied when the predicted property meets this threshold.",
+                    "Threshold",
+                    step=0.01,
+                    format="%.4f",
+                    required=True,
+                    help="Constraint is satisfied when the predicted property meets this threshold.",
                 ),
             },
         )
@@ -199,7 +244,7 @@ with left_col:
 
 with right_col:
 
-    # ── 4. Fixed excipients (disintegrant + lubricant) ──────────────────
+    # ── 4. Fixed excipients (disintegrant + lubricant) ──────────────────────
     with st.container(border=True):
         st.markdown("**Fixed Excipients**")
         disint_default_idx = 0
@@ -226,7 +271,7 @@ with right_col:
             disintegrant_fraction = st.number_input(
                 "Disintegrant fraction",
                 min_value=0.001, max_value=0.30,
-                value=float(defaults.get("disintegrant_fraction", 0.08)),
+                value=float(defaults.get("disintegrant_fraction", 0.04)),
                 step=0.005, format="%.4f", key="df_disint_f",
                 label_visibility="collapsed",
             )
@@ -251,7 +296,7 @@ with right_col:
                 label_visibility="collapsed",
             )
 
-    # ── 5. Search space (fillers + CP bounds) ───────────────────────────
+    # ── 5. Search space (fillers + CP bounds) ───────────────────────────────
     with st.container(border=True):
         st.markdown(
             "<div class='role-pill role-filler'>📦 Candidate Fillers</div>",
@@ -285,7 +330,7 @@ with right_col:
             step=0.01,
         )
 
-    # ── 6. Solver settings ──────────────────────────────────────────────
+    # ── 6. Solver settings ──────────────────────────────────────────────────
     with st.container(border=True):
         st.markdown("**Solver Settings**")
         s1, s2, s3, s4 = st.columns(4)
@@ -298,48 +343,95 @@ with right_col:
 run_clicked = st.button("▶  Run Optimisation", type="primary", use_container_width=True)
 
 if run_clicked:
-    try:
-        cleaned_constraints = (
-            st.session_state["df_constraints_table"]
-            .dropna(subset=["name", "threshold"])
-            .to_dict(orient="records")
-        )
-        filtered_fillers = [
-            cid for cid in excipient_options
-            if cid not in {cmac_id, disintegrant_id, lubricant_id}
-        ]
-        result = digital_formulator(
-            cmac_id=cmac_id,
-            drug_loading=drug_loading,
-            objectives=selected_objectives or None,
-            constraints=cleaned_constraints or None,
-            api_fraction_variable=api_fraction_variable,
-            api_fraction_bounds=api_fraction_bounds,
-            disintegrant_id=disintegrant_id,
-            disintegrant_fraction=disintegrant_fraction,
-            lubricant_id=lubricant_id,
-            lubricant_fraction=lubricant_fraction,
-            excipient_options=filtered_fillers or None,
-            filler1_fraction_lower=filler1_fraction_lower,
-            cp_bounds=(cp_lower, cp_upper),
-            pop_size=int(pop_size),
-            n_iters=int(n_iters),
-            n_threads=int(n_threads),
-            seed=int(seed),
-        )
-        st.session_state["df_result"] = result
-        st.session_state["df_request"] = {
-            "cmac_id": cmac_id,
-            "drug_loading": drug_loading,
-            "objectives": selected_objectives or defaults.get("objectives", []),
-            "constraints": cleaned_constraints,
-            "excipient_options": filtered_fillers,
-            "cp_bounds": (cp_lower, cp_upper),
+    # Build constraint payload: map friendly labels → raw IDs, skip inactive rows
+    cleaned_constraints = [
+        {
+            "name":      _CON_LABEL_TO_ID.get(str(row["name"]), str(row["name"])),
+            "threshold": float(row["threshold"]),
         }
-    except Exception as exc:
-        st.error(f"Optimisation failed: {exc}")
+        for _, row in constraint_df.dropna(subset=["name", "threshold"]).iterrows()
+        if bool(row.get("active", True))
+    ]
+    filtered_fillers = [
+        cid for cid in excipient_options
+        if cid not in {cmac_id, disintegrant_id, lubricant_id}
+    ]
 
-result      = st.session_state.get("df_result")
+    # ── Progress display ────────────────────────────────────────────────────
+    _prog_info = st.empty()
+    _prog_bar  = st.empty()
+
+    _result_holder: list = [None]
+    _error_holder:  list = [None]
+    _done = threading.Event()
+
+    def _run_optimisation() -> None:
+        try:
+            _result_holder[0] = digital_formulator(
+                cmac_id=cmac_id,
+                drug_loading=drug_loading,
+                objectives=selected_objectives or None,
+                constraints=cleaned_constraints or None,
+                api_fraction_variable=api_fraction_variable,
+                api_fraction_bounds=api_fraction_bounds,
+                disintegrant_id=disintegrant_id,
+                disintegrant_fraction=disintegrant_fraction,
+                lubricant_id=lubricant_id,
+                lubricant_fraction=lubricant_fraction,
+                excipient_options=filtered_fillers or None,
+                filler1_fraction_lower=filler1_fraction_lower,
+                cp_bounds=(cp_lower, cp_upper),
+                pop_size=int(pop_size),
+                n_iters=int(n_iters),
+                n_threads=int(n_threads),
+                seed=int(seed),
+            )
+        except Exception as exc:
+            _error_holder[0] = exc
+        finally:
+            _done.set()
+
+    _thread = threading.Thread(target=_run_optimisation, daemon=True)
+    _thread.start()
+
+    total_evals = int(pop_size) * int(n_iters)
+    est_seconds = max(20.0, total_evals * 0.005)
+    t_start     = _time.monotonic()
+    mode_label  = objective_mode(selected_objectives) if selected_objectives else "Default objectives"
+
+    _prog_info.info(
+        f"**Running {mode_label}** · "
+        f"Population {int(pop_size)} × {int(n_iters)} iterations = **{total_evals:,} evaluations**"
+    )
+
+    while not _done.wait(timeout=0.4):
+        elapsed  = _time.monotonic() - t_start
+        frac     = min(0.97, elapsed / est_seconds)
+        est_gen  = int(frac * int(n_iters))
+        _prog_bar.progress(frac, text=f"Generation ~{est_gen} / {int(n_iters)}  ·  {elapsed:.0f}s elapsed")
+
+    _thread.join()
+    _prog_info.empty()
+    _prog_bar.empty()
+
+    if _error_holder[0] is not None:
+        st.error(f"Optimisation failed: {_error_holder[0]}")
+    else:
+        st.session_state["df_result"]  = _result_holder[0]
+        st.session_state["df_request"] = {
+            "cmac_id":               cmac_id,
+            "drug_loading":          drug_loading,
+            "objectives":            selected_objectives or defaults.get("objectives", []),
+            "constraints":           cleaned_constraints,
+            "excipient_options":     filtered_fillers,
+            "cp_bounds":             (cp_lower, cp_upper),
+            "disintegrant_id":       disintegrant_id,
+            "disintegrant_fraction": disintegrant_fraction,
+            "lubricant_id":          lubricant_id,
+            "lubricant_fraction":    lubricant_fraction,
+        }
+
+result       = st.session_state.get("df_result")
 request_info = st.session_state.get("df_request", {})
 
 if result is None:
@@ -350,15 +442,17 @@ if result is None:
     )
     st.stop()
 
-metrics             = derived_metrics(result)
+metrics              = derived_metrics(result)
 optimized_components = result.get("optimized_components", [])
 optimized_fractions  = result.get("optimized_fractions", [])
-summary = " | ".join(
-    f"{format_component_option(cid, options)} ({frac:.3f})"
-    for cid, frac in zip(optimized_components, optimized_fractions)
-)
 
-st.caption(f"**Optimised formulation:** {summary}")
+# Top summary line showing ID + name
+summary_parts = []
+for cid, frac in zip(optimized_components, optimized_fractions):
+    name = component_label(cid, options)
+    part = f"{cid} ({frac:.3f})" if name == cid else f"{cid} — {name} ({frac:.3f})"
+    summary_parts.append(part)
+st.caption(f"**Optimised formulation:** {' | '.join(summary_parts)}")
 st.caption(
     f"Objective mode: "
     f"{objective_mode(request_info['objectives']) if request_info.get('objectives') else 'Backend defaults'} · "
@@ -376,32 +470,86 @@ tab_outcome, tab_constraints, tab_morphology, tab_raw = st.tabs(
 )
 
 with tab_outcome:
-    left, right = st.columns([1.2, 1], gap="large")
-    with left:
-        st.info(
-            f"True density {result['true_density']:.4f} g/cm³ · "
-            f"Bulk density {result['bulk_density']:.4f} g/cm³ · "
-            f"Tapped density {result['tapped_density']:.4f} g/cm³"
+    # ── Formulation composition table ───────────────────────────────────────
+    st.markdown("#### Optimised Formulation Composition")
+    comp_rows = []
+    for cid, frac in zip(optimized_components, optimized_fractions):
+        name = component_label(cid, options)
+        comp_rows.append({
+            "ID":            cid,
+            "Material name": name if name != cid else "—",
+            "Role":          _component_role(cid, request_info.get("cmac_id", "")),
+            "Fraction":      round(frac, 4),
+            "Weight %":      round(frac * 100, 1),
+        })
+    st.dataframe(
+        pd.DataFrame(comp_rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Fraction": st.column_config.NumberColumn(format="%.4f"),
+            "Weight %": st.column_config.NumberColumn(format="%.1f"),
+        },
+    )
+
+    st.divider()
+
+    # ── Powder flow & handling ──────────────────────────────────────────────
+    st.markdown("#### Powder Flow & Handling")
+    fc1, fc2, fc3, fc4, fc5 = st.columns(5)
+    fc1.metric("FFC (predicted)",  f"{result['ffc']:.3f}")
+    fc2.metric("Flow class",       metrics["flow_class"])
+    fc3.metric("Carr's Index",     f"{metrics['carrs_index']:.1f} %")
+    fc4.metric("Hausner Ratio",    f"{metrics['hausner_ratio']:.3f}")
+    fc5.metric("EAOIF",            f"{result['effective_angle_of_internal_friction']:.1f} °")
+    if result["effective_angle_of_internal_friction"] > 41.0:
+        st.warning(
+            f"EAOIF = {result['effective_angle_of_internal_friction']:.1f}° exceeds the 41° "
+            "practical threshold for robust powder flow handling."
         )
-        st.info(
-            f"Tensile window {metrics['tensile_lower']:.3f} – {metrics['tensile_upper']:.3f} MPa · "
-            f"Porosity window {metrics['porosity_lower']:.4f} – {metrics['porosity_upper']:.4f}"
-        )
-        if result["effective_angle_of_internal_friction"] > 41.0:
-            st.warning("EAOIF exceeds the common 41° practical threshold for robust flow handling.")
-    with right:
-        optimized_labels = [format_component_option(cid, options) for cid in optimized_components]
-        st.plotly_chart(formulation_pie(optimized_labels, optimized_fractions), use_container_width=True)
-        st.plotly_chart(formulation_bar(optimized_labels, optimized_fractions), use_container_width=True)
+
+    st.divider()
+
+    # ── Tablet mechanical properties ────────────────────────────────────────
+    st.markdown("#### Tablet Mechanical Properties")
+    tc1, tc2, tc3, tc4 = st.columns(4)
+    tc1.metric("Tensile mean",  f"{result['tensile_mean']:.3f} MPa")
+    tc2.metric("Tensile ± σ",   f"{metrics['tensile_lower']:.3f} – {metrics['tensile_upper']:.3f} MPa")
+    tc3.metric("Porosity mean", f"{result['porosity_mean']:.4f}")
+    tc4.metric("Porosity ± σ",  f"{metrics['porosity_lower']:.4f} – {metrics['porosity_upper']:.4f}")
+
+    st.divider()
+
+    # ── Bulk densities ──────────────────────────────────────────────────────
+    st.markdown("#### Bulk Material Densities")
+    dc1, dc2, dc3 = st.columns(3)
+    dc1.metric("True density",   f"{result['true_density']:.4f} g/cm³")
+    dc2.metric("Bulk density",   f"{result['bulk_density']:.4f} g/cm³")
+    dc3.metric("Tapped density", f"{result['tapped_density']:.4f} g/cm³")
+
+    st.divider()
+
+    # ── Formulation charts ──────────────────────────────────────────────────
+    st.markdown("#### Formulation Composition Charts")
+    chart_labels = [
+        f"{cid} – {component_label(cid, options)}"
+        if component_label(cid, options) != cid else cid
+        for cid in optimized_components
+    ]
+    lc, rc = st.columns([1.2, 1], gap="large")
+    with lc:
+        st.plotly_chart(formulation_pie(chart_labels, optimized_fractions), use_container_width=True)
+    with rc:
+        st.plotly_chart(formulation_bar(chart_labels, optimized_fractions), use_container_width=True)
 
 with tab_constraints:
     _CON_DISPLAY = {
-        "tensile_strength_min":  "Tensile strength lower bound \u2265 threshold (MPa)",
-        "tensile_mean_min":      "Mean tensile strength \u2265 threshold (MPa)",
-        "ffc_min":               "FFC \u2265 threshold",
-        "eaoif_max":             "EAOIF \u2264 threshold (\u00b0)",
-        "porosity_min":          "Porosity \u2265 threshold",
-        "porosity_minus_std_min":"Porosity \u2212 \u03c3 \u2265 threshold (conservative)",
+        "tensile_strength_min":  "Tensile (μ−σ) ≥ threshold [MPa]",
+        "tensile_mean_min":      "Tensile mean μ ≥ threshold [MPa]",
+        "ffc_min":               "FFC μ ≥ threshold",
+        "eaoif_max":             "EAOIF μ ≤ threshold [°]",
+        "porosity_min":          "Porosity mean μ ≥ threshold",
+        "porosity_minus_std_min":"Porosity (μ−σ) ≥ threshold",
     }
     _OBJ_DISPLAY = {
         "maximise_ffc":           "Maximise FFC",
@@ -416,10 +564,10 @@ with tab_constraints:
         for item in constraints_to_check:
             status, value = _constraint_status(result, item["name"], float(item["threshold"]))
             rows.append({
-                "Constraint": _CON_DISPLAY.get(item["name"], item["name"]),
-                "Threshold": float(item["threshold"]),
+                "Constraint":      _CON_DISPLAY.get(item["name"], item["name"]),
+                "Threshold":       float(item["threshold"]),
                 "Predicted value": round(value, 4),
-                "Status": "\u2705 Pass" if status == "Pass" else "\u274c Fail",
+                "Status":          "✅ Pass" if status == "Pass" else "❌ Fail",
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     else:
